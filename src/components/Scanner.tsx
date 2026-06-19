@@ -391,7 +391,11 @@ export default function Scanner() {
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [predictionChoice, setPredictionChoice] = useState<number | null>(null); // Over 1/2/3/4 user selection
+  const [autoScan, setAutoScan] = useState(false);
+  const [lastAutoScan, setLastAutoScan] = useState<number | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoScanRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const { isConnected, subscriptionState, subscribeSymbol } = useDerivWS();
@@ -408,6 +412,22 @@ export default function Scanner() {
     setMwa(result);
     setCombinedSignals(generateCombinedRankedSignals(result, allowedTypes));
   }, [subscriptionState?.ticks.length, allowedTypes]);
+
+  // Continuous automatic scanner — runs every 60 seconds when enabled
+  useEffect(() => {
+    if (!autoScan) return;
+    runScanOnce();
+    if (autoScanRef.current) clearInterval(autoScanRef.current);
+    autoScanRef.current = setInterval(runScanOnce, 60000);
+    return () => { if (autoScanRef.current) clearInterval(autoScanRef.current); };
+  }, [autoScan, runScanOnce]);
+
+  // Auto-advance from orb → config once connected & ticks flow in
+  useEffect(() => {
+    if (step === 'orb' && isConnected && subscriptionState && subscriptionState.ticks.length >= 20) {
+      setStep('config');
+    }
+  }, [step, isConnected, subscriptionState?.ticks.length]);
 
   const startScan = useCallback(() => {
     setStep('scanning');
@@ -437,13 +457,15 @@ export default function Scanner() {
     setScanProgress(0);
     setMwa(null);
     setSelectedSignal(null);
+    setPredictionChoice(null);
   }, []);
 
   const handleLoadBot = useCallback(() => {
     const signalToUse = selectedSignal || combinedSignals[0] || null;
+    const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
     const xml = generateBotXML({
       stake, takeProfit, stopLoss, martingale,
-      symbol: selectedSymbol, bestSignal: signalToUse,
+      symbol: selectedSymbol, bestSignal: signalToUse, entryDigit,
     });
     const blob = new Blob([xml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
@@ -452,17 +474,22 @@ export default function Scanner() {
     a.download = `autoai_bot_${selectedSymbol}.xml`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals]);
+  }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals, predictionChoice]);
 
   const selectedSymbolInfo = SYMBOLS.find((s) => s.id === selectedSymbol);
   const lastDigit = mwa?.lastDigit ?? null;
 
   // Clicking orb toggles the panel
   const handleOrbClick = useCallback(() => {
-    if (orb.isDragging) return; // don't open when dragging
+    if (orb.isDragging) return;
     if (step === 'orb') { setStep('config'); }
     else { setStep('orb'); setMinimized(false); }
   }, [orb.isDragging, step]);
+
+  const runScanOnce = useCallback(() => {
+    if (!isConnected) return;
+    startScan();
+  }, [isConnected, startScan]);
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -491,16 +518,33 @@ export default function Scanner() {
         touchAction: 'none',
       }}
     >
-      {/* Outer glow rings */}
+      {/* Semi-circle bubble glow — rotating arc */}
       <div className="absolute -inset-3 rounded-full pointer-events-none"
         style={{
-          background: 'radial-gradient(circle, rgba(214,26,140,0.25) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(214,26,140,0.22) 0%, transparent 70%)',
           animation: 'orb-pulse 3s ease-in-out infinite',
         }} />
-      <div className="absolute -inset-6 rounded-full pointer-events-none"
+
+      {/* Rotating semi-circle arc (top hemisphere glow) */}
+      <div className="absolute -inset-2 rounded-full pointer-events-none overflow-hidden"
+        style={{ animation: 'orb-arc-spin 6s linear infinite' }}>
+        <div className="absolute inset-0 rounded-full"
+          style={{
+            background: 'conic-gradient(from 0deg, transparent 0deg, rgba(214,26,140,0.55) 60deg, rgba(255,77,141,0.75) 120deg, transparent 180deg, transparent 360deg)',
+            maskImage: 'radial-gradient(circle, transparent 56%, black 58%, black 78%, transparent 80%)',
+            WebkitMaskImage: 'radial-gradient(circle, transparent 56%, black 58%, black 78%, transparent 80%)',
+          }} />
+      </div>
+
+      {/* Counter-rotating ring */}
+      <div className="absolute -inset-5 rounded-full pointer-events-none"
         style={{
-          background: 'radial-gradient(circle, rgba(142,68,173,0.12) 0%, transparent 70%)',
-          animation: 'orb-pulse 3s ease-in-out infinite 0.5s',
+          border: '1px solid rgba(214,26,140,0.18)',
+          borderTopColor: 'rgba(255,77,141,0.5)',
+          borderRightColor: 'transparent',
+          borderBottomColor: 'transparent',
+          borderLeftColor: 'rgba(214,26,140,0.25)',
+          animation: 'orb-ring-spin 8s linear infinite',
         }} />
 
       {/* Main orb body */}
@@ -530,13 +574,6 @@ export default function Scanner() {
             <span className="text-[8px] font-black text-white/80 mt-0.5 tracking-wider">LIVE</span>
           </div>
         )}
-
-        {/* Connection dot */}
-        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-[#1a0a2e]"
-          style={{
-            background: isConnected ? '#10b981' : '#ef4444',
-            boxShadow: isConnected ? '0 0 8px #10b981' : '0 0 8px #ef4444',
-          }} />
       </div>
     </div>
   );
@@ -574,12 +611,7 @@ export default function Scanner() {
               aut<span className="text-[#E67E22]">ai</span>
             </span>
           </div>
-          <div className="w-2 h-2 rounded-full"
-            style={{
-              background: isConnected ? '#10b981' : '#ef4444',
-              boxShadow: isConnected ? '0 0 8px #10b981' : '0 0 8px #ef4444',
-            }} />
-          <span className="text-[10px] text-white/50">{isConnected ? 'Live' : 'Reconnecting...'}</span>
+          <span className="text-[10px] text-white/40">{isConnected ? 'Connected' : 'Connecting...'}</span>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setMinimized((v) => !v)} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/10 transition text-white/50 hover:text-white/80">
@@ -711,22 +743,43 @@ export default function Scanner() {
 
           {/* Config action */}
           {step === 'config' && (
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="space-y-3 pt-1">
+              {/* Continuous scanner toggle */}
               <button
-                onClick={resetScan}
-                className="border-2 rounded-xl font-bold py-3 transition active:scale-95 text-sm"
-                style={{ borderColor: 'rgba(142,68,173,0.5)', color: 'rgba(255,255,255,0.6)', background: 'transparent' }}
+                onClick={() => setAutoScan(a => !a)}
+                className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 border transition active:scale-95"
+                style={{
+                  borderColor: autoScan ? 'rgba(214,26,140,0.5)' : 'rgba(255,255,255,0.15)',
+                  background: autoScan ? 'rgba(214,26,140,0.12)' : 'rgba(255,255,255,0.05)',
+                }}
               >
-                Cancel
+                <div className="flex items-center gap-2">
+                  <RefreshCw size={13} className={autoScan ? 'animate-spin text-[#D61A8C]' : 'text-white/40'} />
+                  <span className="text-xs font-bold text-white/80">Continuous scan (60s)</span>
+                </div>
+                <span className="text-[9px] font-black px-2 py-0.5 rounded-full"
+                  style={{ background: autoScan ? '#D61A8C' : 'rgba(255,255,255,0.15)', color: '#fff' }}>
+                  {autoScan ? 'ON' : 'OFF'}
+                </span>
               </button>
-              <button
-                onClick={startScan}
-                disabled={!isConnected}
-                className="text-white font-bold py-3 rounded-xl shadow-lg transition active:scale-95 text-sm disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, #E67E22, #D61A8C)' }}
-              >
-                {isConnected ? 'Scan Markets' : 'Connecting...'}
-              </button>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={resetScan}
+                  className="border-2 rounded-xl font-bold py-3 transition active:scale-95 text-sm"
+                  style={{ borderColor: 'rgba(142,68,173,0.5)', color: 'rgba(255,255,255,0.6)', background: 'transparent' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={startScan}
+                  disabled={!isConnected}
+                  className="text-white font-bold py-3 rounded-xl shadow-lg transition active:scale-95 text-sm disabled:opacity-50"
+                  style={{ background: 'linear-gradient(135deg, #E67E22, #D61A8C)' }}
+                >
+                  {isConnected ? 'Scan Markets' : 'Connecting...'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -763,6 +816,38 @@ export default function Scanner() {
                     </span>
                   )}
                 </div>
+
+                {/* Over/Under prediction picker — entry digits for the bot */}
+                {selectedSignal && (selectedSignal.type === 'over' || selectedSignal.type === 'pro_over')
+                  && (() => {
+                    const digits = selectedSignal.entryDigits ?? [];
+                    if (!digits.length) return null;
+                    return (
+                      <div className="rounded-xl border p-3 mb-2"
+                        style={{ borderColor: 'rgba(214,26,140,0.35)', background: 'rgba(214,26,140,0.06)' }}>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <TrendingUp size={11} className="text-[#D61A8C]" />
+                          <span className="text-[10px] font-black text-white/80 uppercase tracking-wide">Set Prediction</span>
+                          <span className="text-[9px] text-white/40 ml-auto">Bot will use entry digit</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          {digits.map((d) => (
+                            <button key={d} onClick={() => setPredictionChoice(d)}
+                              className="rounded-lg py-2 text-center font-black transition active:scale-95"
+                              style={{
+                                background: predictionChoice === d ? 'linear-gradient(135deg, #E67E22, #D61A8C)' : 'rgba(255,255,255,0.05)',
+                                color: predictionChoice === d ? '#fff' : 'rgba(255,255,255,0.6)',
+                                border: predictionChoice === d ? '1px solid #D61A8C' : '1px solid rgba(255,255,255,0.1)',
+                              }}>
+                              <span className="block text-base leading-none">OVER</span>
+                              <span className="block text-xs mt-0.5">{d}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                 <div className="space-y-2 max-h-96 overflow-y-auto pr-0.5">
                   {combinedSignals.length > 0
                     ? combinedSignals.map((s, i) => (
@@ -823,8 +908,9 @@ function generateBotXML(opts: {
   martingale: string;
   symbol: string;
   bestSignal: Signal | null;
+  entryDigit?: number;
 }): string {
-  const { stake, takeProfit, stopLoss, martingale, symbol, bestSignal } = opts;
+  const { stake, takeProfit, stopLoss, martingale, symbol, bestSignal, entryDigit } = opts;
 
   let tradeTypeCat = 'digits';
   let tradeType = 'overunder';
@@ -900,6 +986,21 @@ function generateBotXML(opts: {
       singleMode = true; singlePurchaseType = 'PUT';
       singlePrediction = 0; singleEntryOp = 'LTE'; singleEntryThreshold = 4;
     }
+
+    // User-selected entry digit overrides the derived prediction/barrier for Over/Under/MATCHES/DIFFERS
+    if (entryDigit !== undefined) {
+      const upper = dir;
+      if (upper.startsWith('OVER')) {
+        predictionNum = entryDigit;
+        overDigitNum = entryDigit;
+      } else if (upper.startsWith('UNDER')) {
+        predictionNum = entryDigit;
+        underDigitNum = entryDigit;
+      } else if (upper.startsWith('MATCHES') || upper.startsWith('DIFFERS')) {
+        singlePrediction = entryDigit;
+        singleEntryThreshold = entryDigit;
+      }
+    }
   }
 
   const noPredictionTypes = ['CALL', 'PUT', 'DIGITEVEN', 'DIGITODD'];
@@ -923,8 +1024,21 @@ function generateBotXML(opts: {
           </block>
         </value>
         <statement name="DO0">
-          <block type="purchase" id="bp_pur1">
-            <field name="PURCHASE_LIST">${singlePurchaseType}</field>
+          <block type="text_print" id="bp_log_single">
+            <value name="TEXT">
+              <shadow type="text" id="bp_log_single_shadow"><field name="TEXT">digit</field></shadow>
+              <block type="text_join" id="bp_log_single_join">
+                <mutation items="3"></mutation>
+                <value name="ADD0"><block type="text" id="bp_log_single_p0"><field name="TEXT">Last digit: </field></block></value>
+                <value name="ADD1"><block type="last_digit" id="bp_log_single_ld"></block></value>
+                <value name="ADD2"><block type="text" id="bp_log_single_p2"><field name="TEXT"> → BUY ${singlePurchaseType} ${entryDigit ?? predVal}</field></block></value>
+              </block>
+            </value>
+            <next>
+              <block type="purchase" id="bp_pur1">
+                <field name="PURCHASE_LIST">${singlePurchaseType}</field>
+              </block>
+            </next>
           </block>
         </statement>
       </block>`
@@ -961,8 +1075,21 @@ function generateBotXML(opts: {
               </block>
             </value>
             <statement name="DO0">
-              <block type="purchase" id="bp_buy_under">
-                <field name="PURCHASE_LIST">DIGITUNDER</field>
+              <block type="text_print" id="bp_log_under">
+                <value name="TEXT">
+                  <shadow type="text" id="bp_log_under_shadow"><field name="TEXT">digit</field></shadow>
+                  <block type="text_join" id="bp_log_under_join">
+                    <mutation items="3"></mutation>
+                    <value name="ADD0"><block type="text" id="bp_log_under_p0"><field name="TEXT">Last digit: </field></block></value>
+                    <value name="ADD1"><block type="last_digit" id="bp_log_under_ld"></block></value>
+                    <value name="ADD2"><block type="text" id="bp_log_under_p2"><field name="TEXT"> → BUY DIGITUNDER ${entryUnderThreshold}</field></block></value>
+                  </block>
+                </value>
+                <next>
+                  <block type="purchase" id="bp_buy_under">
+                    <field name="PURCHASE_LIST">DIGITUNDER</field>
+                  </block>
+                </next>
               </block>
             </statement>
           </block>
@@ -1000,8 +1127,21 @@ function generateBotXML(opts: {
                   </block>
                 </value>
                 <statement name="DO0">
-                  <block type="purchase" id="bp_buy_over">
-                    <field name="PURCHASE_LIST">DIGITOVER</field>
+                  <block type="text_print" id="bp_log_over">
+                    <value name="TEXT">
+                      <shadow type="text" id="bp_log_over_shadow"><field name="TEXT">digit</field></shadow>
+                      <block type="text_join" id="bp_log_over_join">
+                        <mutation items="3"></mutation>
+                        <value name="ADD0"><block type="text" id="bp_log_over_p0"><field name="TEXT">Last digit: </field></block></value>
+                        <value name="ADD1"><block type="last_digit" id="bp_log_over_ld"></block></value>
+                        <value name="ADD2"><block type="text" id="bp_log_over_p2"><field name="TEXT"> → BUY DIGITOVER ${entryOverThreshold}</field></block></value>
+                      </block>
+                    </value>
+                    <next>
+                      <block type="purchase" id="bp_buy_over">
+                        <field name="PURCHASE_LIST">DIGITOVER</field>
+                      </block>
+                    </next>
                   </block>
                 </statement>
               </block>
@@ -1336,7 +1476,35 @@ function generateBotXML(opts: {
                               <block type="math_number" id="mn_lc">
                                 <field name="NUM">0</field>
                               </block>
-                            </value>${extraInit}
+                            </value>
+                            <next>
+                              <block type="text_print" id="init_log1">
+                                <value name="TEXT">
+                                  <shadow type="text" id="init_log1_shadow"><field name="TEXT">Bot started</field></shadow>
+                                  <block type="text_join" id="init_log1_join">
+                                    <mutation items="4"></mutation>
+                                    <value name="ADD0"><block type="text" id="init_log1_p0"><field name="TEXT">AutoAI Bot — Strategy: </field></block></value>
+                                    <value name="ADD1"><block type="text" id="init_log1_p1"><field name="TEXT">${tradeTypeCat}/${tradeType} ${singleMode ? singlePurchaseType : ''} ${bestSignal?.tradeDirection ?? ''}</field></block></value>
+                                    <value name="ADD2"><block type="text" id="init_log1_p2"><field name="TEXT"> | Entry digit: ${entryDigit ?? predVal}</field></block></value>
+                                    <value name="ADD3"><block type="text" id="init_log1_p3"><field name="TEXT"> | Take Profit: </field></block></value>
+                                  </block>
+                                </value>
+                                <next>
+                                  <block type="text_print" id="init_log2">
+                                    <value name="TEXT">
+                                      <shadow type="text" id="init_log2_shadow"><field name="TEXT">limits</field></shadow>
+                                      <block type="text_join" id="init_log2_join">
+                                        <mutation items="4"></mutation>
+                                        <value name="ADD0"><block type="text" id="init_log2_p0"><field name="TEXT">Stake </field></block></value>
+                                        <value name="ADD1"><block type="variables_get" id="init_log2_stake"><field name="VAR" id="v_stake">Stake</field></block></value>
+                                        <value name="ADD2"><block type="text" id="init_log2_p2"><field name="TEXT"> | TP </field></block></value>
+                                        <value name="ADD3"><block type="variables_get" id="init_log2_tp"><field name="VAR" id="v_tp">Take Profit</field></block></value>
+                                      </block>
+                                    </value>${extraInit}
+                                  </block>
+                                </next>
+                              </block>
+                            </next>
                           </block>
                         </next>
                       </block>

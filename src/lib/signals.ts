@@ -22,6 +22,7 @@ export type Signal = {
   recommendation: string;
   entryCondition: string;
   targetDigit?: number;
+  entryDigits?: number[]; // selectable entry digits for Over/Under signals
   tradeDirection?: string;
   window?: SignalWindow;
   windowsAligned?: boolean;
@@ -189,7 +190,7 @@ function matchesSignal(a: AnalysisResult): Signal {
   const strongest = powerIndex.strongest;
   const strongestPct = digitFrequencies[strongest].percentage;
 
-  if (strongestPct >= 12) {
+  if (strongestPct >= 15) {
     return {
       type: 'matches',
       label: 'Matches',
@@ -200,14 +201,14 @@ function matchesSignal(a: AnalysisResult): Signal {
       targetDigit: strongest,
       tradeDirection: `MATCHES ${strongest}`,
     };
-  } else if (strongestPct >= 10.5) {
+  } else if (strongestPct >= 12) {
     return {
       type: 'matches',
       label: 'Matches',
       status: 'WAIT',
       probability: strongestPct * 5,
       recommendation: `Digit ${strongest} showing moderate frequency (${strongestPct.toFixed(1)}%)`,
-      entryCondition: 'Wait for frequency to increase above 12%',
+      entryCondition: 'Wait for frequency to increase above 15%',
       targetDigit: strongest,
     };
   }
@@ -225,7 +226,7 @@ function differsSignal(a: AnalysisResult): Signal {
   const { digitFrequencies } = a;
   const least = digitFrequencies.reduce((prev, cur) => (cur.percentage < prev.percentage ? cur : prev));
 
-  if (least.percentage < 10) {
+  if (least.percentage >= 0 && least.percentage < 9) {
     return {
       type: 'differs',
       label: 'Differs',
@@ -243,7 +244,8 @@ function differsSignal(a: AnalysisResult): Signal {
     status: 'NEUTRAL',
     probability: 100 - least.percentage,
     recommendation: 'No rare digit found',
-    entryCondition: 'Wait for a digit to drop below 10%',
+    entryCondition: 'Wait for a digit to drop below 9%',
+    targetDigit: least.digit,
   };
 }
 
@@ -442,6 +444,7 @@ function under7Signal(a: AnalysisResult): Signal {
       recommendation: `Under 7: ${under7in20}/20 recent digits are 0-6. Entry on digit ${entryDigit}`,
       entryCondition: `Wait for digit ${entryDigit} to appear as entry trigger, then trade UNDER 7`,
       targetDigit: entryDigit,
+      entryDigits: [7, 8, 9],
       tradeDirection: 'UNDER 7',
     };
   } else if (highDigitsBelow10 >= 1 && under7in20 >= 12) {
@@ -490,6 +493,7 @@ function over2Signal(a: AnalysisResult): Signal {
       recommendation: `Over 2: ${over2in20}/20 recent digits are 3-9. Entry on digit ${entryDigit}`,
       entryCondition: `Wait for digit ${entryDigit} to appear, then trade OVER 2`,
       targetDigit: entryDigit,
+      entryDigits: [1, 2, 3, 4],
       tradeDirection: 'OVER 2',
     };
   } else if (lowDigitsBelow10 >= 1 && over2in20 >= 12) {

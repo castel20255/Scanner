@@ -16,3 +16,13 @@
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+@keyframes orb-ring-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(-360deg); }
+}
+
+@keyframes orb-arc-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
