@@ -31,6 +31,9 @@ const TRADE_TYPES = [
   { id: 'matches', label: 'Matches', types: ['matches'] as SignalType[] },
   { id: 'differs', label: 'Differs', types: ['differs'] as SignalType[] },
   { id: 'rise_fall', label: 'Rise / Fall', types: ['rise_fall'] as SignalType[] },
+  { id: 'pro_over_under', label: 'Pro Over / Under', types: ['pro_over_under', 'under_7', 'over_2'] as SignalType[] },
+  { id: 'pro_even_odd', label: 'Pro Even / Odd', types: ['pro_even_odd'] as SignalType[] },
+  { id: 'all', label: 'All Strategies', types: ['over_under', 'even_odd', 'matches', 'differs', 'rise_fall', 'pro_over_under', 'pro_even_odd', 'under_7', 'over_2'] as SignalType[] },
 ];
 
 // ─── Draggable Orb Hook ───────────────────────────────────────────────────────
@@ -394,6 +397,11 @@ export default function Scanner() {
   const [predictionChoice, setPredictionChoice] = useState<number | null>(null); // Over 1/2/3/4 user selection
   const [autoScan, setAutoScan] = useState(false);
   const [lastAutoScan, setLastAutoScan] = useState<number | null>(null);
+  const [signalShift, setSignalShift] = useState(false);
+  const [showTradeTypePicker, setShowTradeTypePicker] = useState(false);
+  const tradeTypePickerRef = useRef<HTMLDivElement>(null);
+  const prevSignalKeyRef = useRef<string>('');
+  const shiftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const autoScanRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -410,7 +418,20 @@ export default function Scanner() {
     if (!subscriptionState || subscriptionState.ticks.length < 20) return;
     const result = analyzeMultiWindow(subscriptionState.ticks, subscriptionState.quotes);
     setMwa(result);
-    setCombinedSignals(generateCombinedRankedSignals(result, allowedTypes));
+    const newSignals = generateCombinedRankedSignals(result, allowedTypes);
+    setCombinedSignals(newSignals);
+
+    // Signal shift detection: if the top signal's key changed, flag a shift
+    const topSignal = newSignals[0];
+    const currentKey = topSignal
+      ? `${topSignal.type}__${topSignal.tradeDirection ?? ''}__${topSignal.status}`
+      : '';
+    if (prevSignalKeyRef.current && prevSignalKeyRef.current !== currentKey) {
+      setSignalShift(true);
+      if (shiftTimeoutRef.current) clearTimeout(shiftTimeoutRef.current);
+      shiftTimeoutRef.current = setTimeout(() => setSignalShift(false), 5000);
+    }
+    prevSignalKeyRef.current = currentKey;
   }, [subscriptionState?.ticks.length, allowedTypes]);
 
   const startScan = useCallback(() => {
@@ -449,6 +470,18 @@ export default function Scanner() {
     return () => { if (autoScanRef.current) clearInterval(autoScanRef.current); };
   }, [autoScan, runScanOnce]);
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showTradeTypePicker) return;
+    const handler = (e: MouseEvent) => {
+      if (tradeTypePickerRef.current && !tradeTypePickerRef.current.contains(e.target as Node)) {
+        setShowTradeTypePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showTradeTypePicker]);
+
   // Auto-advance from orb → config once connected & ticks flow in
   useEffect(() => {
     if (step === 'orb' && isConnected && subscriptionState && subscriptionState.ticks.length >= 20) {
@@ -458,6 +491,8 @@ export default function Scanner() {
 
   const resetScan = useCallback(() => {
     if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
+    if (shiftTimeoutRef.current) clearTimeout(shiftTimeoutRef.current);
+    setSignalShift(false);
     setStep('config');
     setScanProgress(0);
     setMwa(null);
@@ -666,21 +701,34 @@ export default function Scanner() {
           {/* Trade type */}
           <div>
             <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block mb-2">Trade Type</label>
-            <div className="grid grid-cols-2 gap-2">
-              {TRADE_TYPES.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => { setSelectedTradeType(t.id); setSelectedSignal(null); }}
-                  className="border rounded-xl p-2.5 text-xs font-bold text-center transition"
-                  style={
-                    selectedTradeType === t.id
-                      ? { borderColor: '#D61A8C', color: '#D61A8C', background: 'rgba(214,26,140,0.12)' }
-                      : { borderColor: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.03)' }
-                  }
-                >
-                  {t.label}
-                </button>
-              ))}
+            <div className="relative" ref={tradeTypePickerRef}>
+              <button
+                onClick={() => setShowTradeTypePicker(v => !v)}
+                className="w-full border rounded-xl p-2.5 text-xs font-bold text-left flex items-center justify-between transition"
+                style={{ borderColor: '#D61A8C', color: '#D61A8C', background: 'rgba(214,26,140,0.12)' }}
+              >
+                <span>{TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? 'Select'}</span>
+                <ChevronDown size={14} className={showTradeTypePicker ? 'rotate-180 transition-transform' : 'transition-transform'} />
+              </button>
+              {showTradeTypePicker && (
+                <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#1a0a14] shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
+                  {TRADE_TYPES.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setSelectedTradeType(t.id); setSelectedSignal(null); setShowTradeTypePicker(false); }}
+                      className="w-full px-3 py-2 text-xs font-bold text-left transition flex items-center justify-between hover:bg-white/5"
+                      style={
+                        selectedTradeType === t.id
+                          ? { color: '#D61A8C', background: 'rgba(214,26,140,0.12)' }
+                          : { color: 'rgba(255,255,255,0.6)' }
+                      }
+                    >
+                      <span>{t.label}</span>
+                      {selectedTradeType === t.id && <Check size={12} />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -810,11 +858,18 @@ export default function Scanner() {
                   <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">
                     Ranked Signals · {combinedSignals.length} found
                   </span>
-                  {mwa?.aligned && (
-                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-1">
-                      <Zap size={8} /> All windows aligned
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {signalShift && (
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1 animate-pulse">
+                        <AlertTriangle size={8} /> Signal Shift — Bots Paused
+                      </span>
+                    )}
+                    {mwa?.aligned && (
+                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-1">
+                        <Zap size={8} /> All windows aligned
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Over/Under prediction picker — entry digits for the bot */}
