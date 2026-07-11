@@ -413,27 +413,6 @@ export default function Scanner() {
     setCombinedSignals(generateCombinedRankedSignals(result, allowedTypes));
   }, [subscriptionState?.ticks.length, allowedTypes]);
 
-  const runScanOnce = useCallback(() => {
-    if (!isConnected) return;
-    startScan();
-  }, [isConnected, startScan]);
-
-  // Continuous automatic scanner — runs every 60 seconds when enabled
-  useEffect(() => {
-    if (!autoScan) return;
-    runScanOnce();
-    if (autoScanRef.current) clearInterval(autoScanRef.current);
-    autoScanRef.current = setInterval(runScanOnce, 60000);
-    return () => { if (autoScanRef.current) clearInterval(autoScanRef.current); };
-  }, [autoScan, runScanOnce]);
-
-  // Auto-advance from orb → config once connected & ticks flow in
-  useEffect(() => {
-    if (step === 'orb' && isConnected && subscriptionState && subscriptionState.ticks.length >= 20) {
-      setStep('config');
-    }
-  }, [step, isConnected, subscriptionState?.ticks.length]);
-
   const startScan = useCallback(() => {
     setStep('scanning');
     setScanProgress(0);
@@ -455,6 +434,27 @@ export default function Scanner() {
       }
     }, 400);
   }, [multiMarket, selectedSymbol, subscribeSymbol]);
+
+  const runScanOnce = useCallback(() => {
+    if (!isConnected) return;
+    startScan();
+  }, [isConnected, startScan]);
+
+  // Continuous automatic scanner — runs every 60 seconds when enabled
+  useEffect(() => {
+    if (!autoScan) return;
+    runScanOnce();
+    if (autoScanRef.current) clearInterval(autoScanRef.current);
+    autoScanRef.current = setInterval(runScanOnce, 60000);
+    return () => { if (autoScanRef.current) clearInterval(autoScanRef.current); };
+  }, [autoScan, runScanOnce]);
+
+  // Auto-advance from orb → config once connected & ticks flow in
+  useEffect(() => {
+    if (step === 'orb' && isConnected && subscriptionState && subscriptionState.ticks.length >= 20) {
+      setStep('config');
+    }
+  }, [step, isConnected, subscriptionState?.ticks.length]);
 
   const resetScan = useCallback(() => {
     if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
