@@ -931,36 +931,28 @@ function generateBotXML(opts: {
     const dir = (bestSignal.tradeDirection ?? '').toUpperCase();
     const td = bestSignal.targetDigit;
 
-    if (dir.includes('UNDER 8')) {
+    // Parse OVER X / UNDER X dynamically
+    const overMatch = dir.match(/^OVER\s+(\d+)$/);
+    const underMatch = dir.match(/^UNDER\s+(\d+)$/);
+    const matchesMatch = dir.match(/^MATCHES\s+(\d+)$/);
+    const differsMatch = dir.match(/^DIFFERS\s+(\d+)$/);
+
+    if (underMatch) {
+      const underDigit = parseInt(underMatch[1], 10);
       tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = 8; underDigitNum = 8;
-      entryUnderOp = 'GTE'; entryUnderThreshold = 7;
-      overDigitNum = 2; entryOverOp = 'LTE'; entryOverThreshold = 3;
-    } else if (dir.includes('UNDER 7')) {
+      predictionNum = underDigit; underDigitNum = underDigit;
+      entryUnderOp = 'GTE'; entryUnderThreshold = Math.max(0, underDigit - 1);
+      // Complementary over digit
+      overDigitNum = Math.min(9, underDigit <= 4 ? 2 : underDigit - 2);
+      entryOverOp = 'LTE'; entryOverThreshold = Math.min(9, overDigitNum + 1);
+    } else if (overMatch) {
+      const overDigit = parseInt(overMatch[1], 10);
       tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = 7; underDigitNum = 7;
-      entryUnderOp = 'GTE'; entryUnderThreshold = 6;
-      overDigitNum = 2; entryOverOp = 'LTE'; entryOverThreshold = 3;
-    } else if (dir.includes('UNDER 4')) {
-      tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = 4; underDigitNum = 4;
-      entryUnderOp = 'GTE'; entryUnderThreshold = 3;
-      overDigitNum = 2; entryOverOp = 'LTE'; entryOverThreshold = 3;
-    } else if (dir.includes('OVER 4')) {
-      tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = 4; overDigitNum = 4;
-      entryOverOp = 'LTE'; entryOverThreshold = 5;
-      underDigitNum = 7; entryUnderOp = 'GTE'; entryUnderThreshold = 6;
-    } else if (dir.includes('OVER 2')) {
-      tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = 2; overDigitNum = 2;
-      entryOverOp = 'LTE'; entryOverThreshold = 3;
-      underDigitNum = 7; entryUnderOp = 'GTE'; entryUnderThreshold = 6;
-    } else if (dir.includes('OVER 1')) {
-      tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = 1; overDigitNum = 1;
-      entryOverOp = 'LTE'; entryOverThreshold = 2;
-      underDigitNum = 7; entryUnderOp = 'GTE'; entryUnderThreshold = 6;
+      predictionNum = overDigit; overDigitNum = overDigit;
+      entryOverOp = 'LTE'; entryOverThreshold = Math.min(9, overDigit + 1);
+      // Complementary under digit
+      underDigitNum = Math.max(0, overDigit >= 5 ? 7 : overDigit + 2);
+      entryUnderOp = 'GTE'; entryUnderThreshold = Math.max(0, underDigitNum - 1);
     } else if (dir === 'EVEN') {
       tradeTypeCat = 'digits'; tradeType = 'evenodd';
       singleMode = true; singlePurchaseType = 'DIGITEVEN';
@@ -969,14 +961,16 @@ function generateBotXML(opts: {
       tradeTypeCat = 'digits'; tradeType = 'evenodd';
       singleMode = true; singlePurchaseType = 'DIGITODD';
       singlePrediction = 0; singleEntryOp = 'EQ'; singleEntryThreshold = 0;
-    } else if (dir.startsWith('MATCHES') && td !== undefined) {
+    } else if (matchesMatch) {
+      const matchDigit = parseInt(matchesMatch[1], 10);
       tradeTypeCat = 'digits'; tradeType = 'digits';
       singleMode = true; singlePurchaseType = 'DIGITMATCH';
-      singlePrediction = td; singleEntryOp = 'EQ'; singleEntryThreshold = td;
-    } else if (dir.startsWith('DIFFERS') && td !== undefined) {
+      singlePrediction = matchDigit; singleEntryOp = 'EQ'; singleEntryThreshold = matchDigit;
+    } else if (differsMatch) {
+      const differDigit = parseInt(differsMatch[1], 10);
       tradeTypeCat = 'digits'; tradeType = 'digits';
       singleMode = true; singlePurchaseType = 'DIGITDIFF';
-      singlePrediction = td; singleEntryOp = 'EQ'; singleEntryThreshold = td;
+      singlePrediction = differDigit; singleEntryOp = 'EQ'; singleEntryThreshold = differDigit;
     } else if (dir === 'RISE') {
       tradeTypeCat = 'callput'; tradeType = 'risefall';
       singleMode = true; singlePurchaseType = 'CALL';
@@ -989,14 +983,15 @@ function generateBotXML(opts: {
 
     // User-selected entry digit overrides the derived prediction/barrier for Over/Under/MATCHES/DIFFERS
     if (entryDigit !== undefined) {
-      const upper = dir;
-      if (upper.startsWith('OVER')) {
+      if (overMatch) {
         predictionNum = entryDigit;
         overDigitNum = entryDigit;
-      } else if (upper.startsWith('UNDER')) {
+        entryOverThreshold = Math.min(9, entryDigit + 1);
+      } else if (underMatch) {
         predictionNum = entryDigit;
         underDigitNum = entryDigit;
-      } else if (upper.startsWith('MATCHES') || upper.startsWith('DIFFERS')) {
+        entryUnderThreshold = Math.max(0, entryDigit - 1);
+      } else if (matchesMatch || differsMatch) {
         singlePrediction = entryDigit;
         singleEntryThreshold = entryDigit;
       }

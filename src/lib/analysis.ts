@@ -4,6 +4,14 @@ export type DigitFrequency = {
   percentage: number;
 };
 
+export type DigitTrend = {
+  digit: number;
+  recentPercentage: number; // last 25 ticks
+  overallPercentage: number; // full window
+  delta: number; // recentPercentage - overallPercentage (positive = increasing)
+  trendDirection: 'increasing' | 'decreasing' | 'stable';
+};
+
 export type AnalysisResult = {
   digitFrequencies: DigitFrequency[];
   evenCount: number;
@@ -17,13 +25,17 @@ export type AnalysisResult = {
   entropy: number;
   powerIndex: {
     strongest: number;
+    secondStrongest: number;
     weakest: number;
+    secondWeakest: number;
     gap: number;
   };
+  digitTrends: DigitTrend[];
   missingDigits: number[];
   streaks: { digit: number; count: number }[];
   totalTicks: number;
   last20: number[];
+  last25: number[];
   last10quotes: number[];
 };
 
@@ -67,9 +79,25 @@ export function analyzeDigits(ticks: number[], quotes: number[]): AnalysisResult
     }
   }
 
-  const strongest = digitFrequencies.reduce((a, b) => (b.percentage > a.percentage ? b : a)).digit;
-  const weakest = digitFrequencies.reduce((a, b) => (b.percentage < a.percentage ? b : a)).digit;
+  const sorted = [...digitFrequencies].sort((a, b) => b.percentage - a.percentage);
+  const strongest = sorted[0].digit;
+  const secondStrongest = sorted[1].digit;
+  const weakest = sorted[sorted.length - 1].digit;
+  const secondWeakest = sorted[sorted.length - 2].digit;
   const gap = digitFrequencies[strongest].percentage - digitFrequencies[weakest].percentage;
+
+  // Digit trends: compare last-25-tick frequency vs overall frequency
+  const last25 = ticks.slice(-25);
+  const recentCounts = new Array(10).fill(0);
+  for (const d of last25) recentCounts[d]++;
+  const digitTrends: DigitTrend[] = counts.map((c, i) => {
+    const overallPercentage = total > 0 ? (c / total) * 100 : 0;
+    const recentPercentage = last25.length > 0 ? (recentCounts[i] / last25.length) * 100 : 0;
+    const delta = recentPercentage - overallPercentage;
+    const trendDirection: DigitTrend['trendDirection'] =
+      delta > 0.3 ? 'increasing' : delta < -0.3 ? 'decreasing' : 'stable';
+    return { digit: i, recentPercentage, overallPercentage, delta, trendDirection };
+  });
 
   const missingDigits = digitFrequencies.filter((d) => d.count === 0).map((d) => d.digit);
 
@@ -95,11 +123,13 @@ export function analyzeDigits(ticks: number[], quotes: number[]): AnalysisResult
     highPercentage,
     lowPercentage,
     entropy,
-    powerIndex: { strongest, weakest, gap },
+    powerIndex: { strongest, secondStrongest, weakest, secondWeakest, gap },
+    digitTrends,
     missingDigits,
     streaks,
     totalTicks: total,
     last20: ticks.slice(-20),
+    last25,
     last10quotes: quotes.slice(-10),
   };
 }
@@ -145,11 +175,13 @@ function emptyResult(): AnalysisResult {
     highPercentage: 0,
     lowPercentage: 0,
     entropy: 0,
-    powerIndex: { strongest: 0, weakest: 0, gap: 0 },
+    powerIndex: { strongest: 0, secondStrongest: 1, weakest: 0, secondWeakest: 1, gap: 0 },
+    digitTrends: Array.from({ length: 10 }, (_, i) => ({ digit: i, recentPercentage: 0, overallPercentage: 0, delta: 0, trendDirection: 'stable' as const })),
     missingDigits: [],
     streaks: [],
     totalTicks: 0,
     last20: [],
+    last25: [],
     last10quotes: [],
   };
 }

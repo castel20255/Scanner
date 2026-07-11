@@ -104,54 +104,157 @@ export function generateSignals(a: AnalysisResult): Signal[] {
 }
 
 function evenOddSignal(a: AnalysisResult): Signal {
-  const { evenPercentage, oddPercentage } = a;
-  const max = Math.max(evenPercentage, oddPercentage);
-  const favored = evenPercentage >= oddPercentage ? 'EVEN' : 'ODD';
+  const { last25, evenPercentage, oddPercentage } = a;
+
+  // Determine the dominant parity from the highest-frequency digits in last 25 ticks
+  const last25Counts = new Array(10).fill(0);
+  for (const d of last25) last25Counts[d]++;
+  // Get top 3 most frequent digits in last 25 ticks
+  const topDigits25 = last25Counts
+    .map((count, digit) => ({ digit, count }))
+    .sort((x, y) => y.count - x.count)
+    .slice(0, 3);
+  const evenAmongTop = topDigits25.filter(d => d.digit % 2 === 0).length;
+  const oddAmongTop = topDigits25.filter(d => d.digit % 2 !== 0).length;
+
+  // The favored parity is whichever is dominant among the top digits in last 25
+  const favoredByTop = evenAmongTop > oddAmongTop ? 'EVEN' : 'ODD';
+  // Also check overall even/odd percentage alignment
+  const favoredOverall = evenPercentage >= oddPercentage ? 'EVEN' : 'ODD';
+
+  // Alignment: the top digits in last 25 must agree with the overall even/odd bias
+  const aligned = favoredByTop === favoredOverall;
+  const favored = aligned ? favoredByTop : favoredOverall;
   const opposite = favored === 'EVEN' ? 'ODD' : 'EVEN';
 
-  const last = a.last20;
-  let consecutive = 0;
+  // Check for 2+ consecutive opposite-parity digits followed by one favored-parity digit
+  // Look at the last few ticks
+  const last = last25;
+  if (last.length < 3) {
+    return {
+      type: 'even_odd',
+      label: 'Even / Odd',
+      status: 'NEUTRAL',
+      probability: Math.max(evenPercentage, oddPercentage),
+      recommendation: 'Not enough tick data for even/odd pattern',
+      entryCondition: 'Waiting for more tick data',
+      tradeDirection: favored,
+    };
+  }
+
+  // Count consecutive opposite digits at the end of the sequence
+  let consecutiveOpposite = 0;
   for (let i = last.length - 1; i >= 0; i--) {
     const isOpposite = favored === 'EVEN' ? last[i] % 2 !== 0 : last[i] % 2 === 0;
-    if (isOpposite) consecutive++;
+    if (isOpposite) consecutiveOpposite++;
     else break;
   }
 
-  if (max >= 55) {
+  // Entry: 2+ consecutive opposite, then one favored digit appears
+  // We check if the tick before the consecutive run was a favored digit
+  // Or: the last tick is a favored digit and before it were 2+ opposite
+  let entryTriggered = false;
+  if (consecutiveOpposite >= 2) {
+    // We're in a streak of opposite digits — waiting for one favored to appear
+    entryTriggered = false;
+  } else if (consecutiveOpposite === 0 && last.length >= 3) {
+    // Last tick is favored — check if there were 2+ opposite before it
+    const lastDigit = last[last.length - 1];
+    const isFavored = favored === 'EVEN' ? lastDigit % 2 === 0 : lastDigit % 2 !== 0;
+    if (isFavored) {
+      let consecBefore = 0;
+      for (let i = last.length - 2; i >= 0; i--) {
+        const isOpp = favored === 'EVEN' ? last[i] % 2 !== 0 : last[i] % 2 === 0;
+        if (isOpp) consecBefore++;
+        else break;
+      }
+      if (consecBefore >= 2) entryTriggered = true;
+    }
+  }
+
+  const maxPct = Math.max(evenPercentage, oddPercentage);
+  const biasStrength = Math.abs(evenPercentage - oddPercentage);
+
+  if (aligned && entryTriggered && maxPct >= 52) {
     return {
       type: 'even_odd',
       label: 'Even / Odd',
       status: 'TRADE NOW',
-      probability: max,
-      recommendation: `Strong ${favored} bias detected (${max.toFixed(1)}%)`,
-      entryCondition: `Wait for 2+ consecutive ${opposite} digits, then trade ${favored}`,
+      probability: maxPct,
+      recommendation: `${favored} bias aligned (${maxPct.toFixed(1)}%) — 2+ ${opposite} then ${favored} appeared. Trade ${favored}`,
+      entryCondition: `2+ consecutive ${opposite} digits followed by one ${favored} — trade ${favored}`,
       tradeDirection: favored,
     };
-  } else if (max >= 52) {
+  }
+
+  if (aligned && consecutiveOpposite >= 2 && maxPct >= 52) {
     return {
       type: 'even_odd',
       label: 'Even / Odd',
       status: 'WAIT',
-      probability: max,
-      recommendation: `Moderate ${favored} bias (${max.toFixed(1)}%)`,
-      entryCondition: 'Monitor for stronger signal',
+      probability: maxPct,
+      recommendation: `${favored} bias (${maxPct.toFixed(1)}%) — ${consecutiveOpposite} consecutive ${opposite} detected, waiting for ${favored}`,
+      entryCondition: `Waiting for one ${favored} digit after ${consecutiveOpposite} consecutive ${opposite}`,
       tradeDirection: favored,
     };
   }
+
+  if (!aligned) {
+    return {
+      type: 'even_odd',
+      label: 'Even / Odd',
+      status: 'NEUTRAL',
+      probability: maxPct,
+      recommendation: `Top digits in last 25 ticks favor ${favoredByTop} but overall favors ${favoredOverall} — not aligned`,
+      entryCondition: 'Waiting for last-25-tick top digits to align with overall even/odd bias',
+      tradeDirection: favoredOverall,
+    };
+  }
+
   return {
     type: 'even_odd',
     label: 'Even / Odd',
-    status: 'NEUTRAL',
-    probability: max,
-    recommendation: 'No clear even/odd pattern',
-    entryCondition: 'Wait for clearer bias',
+    status: 'WAIT',
+    probability: maxPct,
+    recommendation: `${favored} bias (${maxPct.toFixed(1)}%) but no entry pattern yet`,
+    entryCondition: `Waiting for 2+ consecutive ${opposite} then one ${favored}`,
+    tradeDirection: favored,
   };
 }
 
 function overUnderSignal(a: AnalysisResult): Signal {
-  const { highPercentage, lowPercentage, powerIndex } = a;
+  const { highPercentage, lowPercentage, powerIndex, digitFrequencies, digitTrends } = a;
   const max = Math.max(highPercentage, lowPercentage);
-  const favored = highPercentage >= lowPercentage ? 'OVER 4.5' : 'UNDER 4.5';
+  const favored = highPercentage >= lowPercentage ? 'OVER' : 'UNDER';
+
+  // Auto-configure entry digit: use the strongest digit's trend
+  // If favored OVER, entry digit should be the strongest high digit (>=5)
+  // If favored UNDER, entry digit should be the strongest low digit (<=4)
+  const strongest = powerIndex.strongest;
+  const strongestTrend = digitTrends[strongest];
+
+  // Determine the best entry digit based on direction and trend
+  let entryDigit: number;
+  if (favored === 'OVER') {
+    // For OVER, pick the highest-frequency digit >=5 that is increasing
+    const highDigits = digitTrends
+      .filter(t => t.digit >= 5 && t.trendDirection === 'increasing')
+      .sort((x, y) => y.recentPercentage - x.recentPercentage);
+    entryDigit = highDigits[0]?.digit ?? strongest;
+  } else {
+    // For UNDER, pick the highest-frequency digit <=4 that is increasing
+    const lowDigits = digitTrends
+      .filter(t => t.digit <= 4 && t.trendDirection === 'increasing')
+      .sort((x, y) => y.recentPercentage - x.recentPercentage);
+    entryDigit = lowDigits[0]?.digit ?? strongest;
+  }
+
+  // Entry digits for user selection
+  const entryDigits = favored === 'OVER'
+    ? [5, 6, 7, 8].filter(d => digitFrequencies[d].percentage >= 8)
+    : [4, 3, 2, 1].filter(d => digitFrequencies[d].percentage >= 8);
+  const fallbackDigits = favored === 'OVER' ? [5, 6, 7, 8] : [4, 3, 2, 1];
+  const finalEntryDigits = entryDigits.length >= 2 ? entryDigits : fallbackDigits;
 
   if (max >= 56 && powerIndex.gap >= 10) {
     return {
@@ -159,10 +262,11 @@ function overUnderSignal(a: AnalysisResult): Signal {
       label: 'Over / Under',
       status: 'TRADE NOW',
       probability: max,
-      recommendation: `Strong ${favored} bias (${max.toFixed(1)}%, gap: ${powerIndex.gap.toFixed(1)}%)`,
-      entryCondition: `Trade when digit ${powerIndex.strongest} appears`,
-      targetDigit: powerIndex.strongest,
-      tradeDirection: favored,
+      recommendation: `Strong ${favored} bias (${max.toFixed(1)}%, gap: ${powerIndex.gap.toFixed(1)}%) — Entry digit ${entryDigit} (trend: ${strongestTrend.trendDirection})`,
+      entryCondition: `Trade ${favored} ${entryDigit} when digit ${entryDigit} appears`,
+      targetDigit: entryDigit,
+      entryDigits: finalEntryDigits,
+      tradeDirection: `${favored} ${entryDigit}`,
     };
   } else if (max >= 53) {
     return {
@@ -170,9 +274,11 @@ function overUnderSignal(a: AnalysisResult): Signal {
       label: 'Over / Under',
       status: 'WAIT',
       probability: max,
-      recommendation: `Moderate ${favored} bias (${max.toFixed(1)}%)`,
-      entryCondition: 'Wait for power gap to increase',
-      tradeDirection: favored,
+      recommendation: `Moderate ${favored} bias (${max.toFixed(1)}%) — Entry digit ${entryDigit}`,
+      entryCondition: 'Wait for power gap to increase above 10%',
+      targetDigit: entryDigit,
+      entryDigits: finalEntryDigits,
+      tradeDirection: `${favored} ${entryDigit}`,
     };
   }
   return {
@@ -182,70 +288,128 @@ function overUnderSignal(a: AnalysisResult): Signal {
     probability: max,
     recommendation: 'No clear high/low pattern',
     entryCondition: 'Insufficient data',
+    targetDigit: entryDigit,
+    entryDigits: finalEntryDigits,
+    tradeDirection: `${favored} ${entryDigit}`,
   };
 }
 
 function matchesSignal(a: AnalysisResult): Signal {
-  const { powerIndex, digitFrequencies } = a;
+  const { powerIndex, digitFrequencies, digitTrends } = a;
   const strongest = powerIndex.strongest;
-  const strongestPct = digitFrequencies[strongest].percentage;
+  const secondStrongest = powerIndex.secondStrongest;
+  const weakest = powerIndex.weakest;
 
-  if (strongestPct >= 15) {
+  const strongestPct = digitFrequencies[strongest].percentage;
+  const secondPct = digitFrequencies[secondStrongest].percentage;
+  const weakestPct = digitFrequencies[weakest].percentage;
+
+  // Priority: highest appearing → 2nd most appearing → least appearing
+  // Only trade if the chosen digit is increasing (delta >= 0.3%)
+  const candidates = [
+    { digit: strongest, pct: strongestPct, trend: digitTrends[strongest] },
+    { digit: secondStrongest, pct: secondPct, trend: digitTrends[secondStrongest] },
+    { digit: weakest, pct: weakestPct, trend: digitTrends[weakest] },
+  ];
+
+  // Find the first candidate that is increasing with 0.3%+
+  const tradeCandidate = candidates.find(c => c.trend.delta >= 0.3);
+
+  if (tradeCandidate && tradeCandidate.pct >= 10) {
+    const prob = Math.min(tradeCandidate.pct * 5, 95);
     return {
       type: 'matches',
       label: 'Matches',
       status: 'TRADE NOW',
-      probability: Math.min(strongestPct * 5, 95),
-      recommendation: `Digit ${strongest} has strong power at ${strongestPct.toFixed(1)}%`,
-      entryCondition: `Trade MATCHES on digit ${strongest} immediately when it appears`,
-      targetDigit: strongest,
-      tradeDirection: `MATCHES ${strongest}`,
+      probability: prob,
+      recommendation: `Digit ${tradeCandidate.digit} at ${tradeCandidate.pct.toFixed(1)}% and rising (+${tradeCandidate.trend.delta.toFixed(1)}%) — Trade MATCHES`,
+      entryCondition: `Trade MATCHES on digit ${tradeCandidate.digit} when it appears (freq increasing 0.3%+)`,
+      targetDigit: tradeCandidate.digit,
+      entryDigits: [strongest, secondStrongest, weakest],
+      tradeDirection: `MATCHES ${tradeCandidate.digit}`,
     };
-  } else if (strongestPct >= 12) {
+  }
+
+  // WAIT if any candidate is strong but not yet increasing enough
+  if (strongestPct >= 12) {
     return {
       type: 'matches',
       label: 'Matches',
       status: 'WAIT',
       probability: strongestPct * 5,
-      recommendation: `Digit ${strongest} showing moderate frequency (${strongestPct.toFixed(1)}%)`,
-      entryCondition: 'Wait for frequency to increase above 15%',
+      recommendation: `Digit ${strongest} at ${strongestPct.toFixed(1)}% but trend ${digitTrends[strongest].trendDirection} (delta ${digitTrends[strongest].delta.toFixed(1)}%)`,
+      entryCondition: 'Wait for digit frequency to increase by 0.3%+ before trading',
       targetDigit: strongest,
+      entryDigits: [strongest, secondStrongest, weakest],
     };
   }
+
   return {
     type: 'matches',
     label: 'Matches',
     status: 'NEUTRAL',
     probability: strongestPct * 5,
-    recommendation: 'No dominant digit pattern',
-    entryCondition: 'Insufficient pattern strength',
+    recommendation: 'No dominant digit with rising trend',
+    entryCondition: 'Waiting for a digit to increase 0.3%+ in frequency',
+    targetDigit: strongest,
+    entryDigits: [strongest, secondStrongest, weakest],
   };
 }
 
 function differsSignal(a: AnalysisResult): Signal {
-  const { digitFrequencies } = a;
-  const least = digitFrequencies.reduce((prev, cur) => (cur.percentage < prev.percentage ? cur : prev));
+  const { powerIndex, digitFrequencies, digitTrends } = a;
+  const { strongest, secondStrongest, weakest } = powerIndex;
 
-  if (least.percentage >= 0 && least.percentage < 9) {
+  // Excluded digits: most, 2nd most, and least appearing
+  const excluded = new Set([strongest, secondStrongest, weakest]);
+
+  // Candidate: <10% frequency AND decreasing AND NOT in excluded set
+  const candidates = digitTrends.filter(t => {
+    const freq = digitFrequencies[t.digit].percentage;
+    return !excluded.has(t.digit) && freq < 10 && t.trendDirection === 'decreasing';
+  });
+
+  if (candidates.length > 0) {
+    const best = candidates.reduce((x, y) => x.recentPercentage < y.recentPercentage ? x : y);
+    const prob = Math.min((10 - best.recentPercentage) * 8, 90);
+
+    const lastFew = a.last25.slice(-5);
+    const excludedAppearing = lastFew.some(d => excluded.has(d));
+    const digitAppearing = lastFew.some(d => d === best.digit);
+
+    if (excludedAppearing && !digitAppearing) {
+      return {
+        type: 'differs',
+        label: 'Differs',
+        status: 'TRADE NOW',
+        probability: prob,
+        recommendation: `Digit ${best.digit} at ${best.recentPercentage.toFixed(1)}% & decreasing — Excluded digits appearing. Trade DIFFERS`,
+        entryCondition: `Trade DIFFERS on digit ${best.digit} (excluded digits appearing, target decreasing)`,
+        targetDigit: best.digit,
+        entryDigits: [best.digit],
+        tradeDirection: `DIFFERS ${best.digit}`,
+      };
+    }
+
     return {
       type: 'differs',
       label: 'Differs',
-      status: 'TRADE NOW',
-      probability: 100 - least.percentage,
-      recommendation: `Digit ${least.digit} appears only ${least.percentage.toFixed(1)}% — Strong differs signal`,
-      entryCondition: `Wait for digit ${least.digit} to appear, then trade DIFFERS`,
-      targetDigit: least.digit,
-      tradeDirection: `DIFFERS ${least.digit}`,
+      status: 'WAIT',
+      probability: prob,
+      recommendation: `Digit ${best.digit} at ${best.recentPercentage.toFixed(1)}% & decreasing, but entry conditions not met`,
+      entryCondition: 'Wait for excluded digits to appear while target digit stays low/decreasing',
+      targetDigit: best.digit,
+      entryDigits: [best.digit],
     };
   }
+
   return {
     type: 'differs',
     label: 'Differs',
     status: 'NEUTRAL',
-    probability: 100 - least.percentage,
-    recommendation: 'No rare digit found',
-    entryCondition: 'Wait for a digit to drop below 9%',
-    targetDigit: least.digit,
+    probability: 50,
+    recommendation: 'No suitable digit for differs (need <10%, decreasing, not top/bottom/2nd)',
+    entryCondition: 'Waiting for a low-frequency decreasing digit outside excluded set',
   };
 }
 
@@ -291,26 +455,37 @@ export function generateProSignals(a: AnalysisResult): Signal[] {
 }
 
 function proEvenOddSignal(a: AnalysisResult): Signal {
-  const { evenPercentage, oddPercentage, digitFrequencies, powerIndex, last20 } = a;
+  const { evenPercentage, oddPercentage, digitFrequencies, powerIndex, last25 } = a;
+
+  // Check alignment: top digits in last 25 must align with overall even/odd bias
+  const last25Counts = new Array(10).fill(0);
+  for (const d of last25) last25Counts[d]++;
+  const topDigits25 = last25Counts
+    .map((count, digit) => ({ digit, count }))
+    .sort((x, y) => y.count - x.count)
+    .slice(0, 3);
+  const evenAmongTop = topDigits25.filter(d => d.digit % 2 === 0).length;
+  const oddAmongTop = topDigits25.filter(d => d.digit % 2 !== 0).length;
+  const topFavored = evenAmongTop > oddAmongTop ? 'EVEN' : 'ODD';
 
   const evenDigitsAbove11 = [0, 2, 4, 6, 8].filter((d) => digitFrequencies[d].percentage >= 11).length;
   const strongestIsEven = powerIndex.strongest % 2 === 0;
-  const evenIn20 = last20.filter((d) => d % 2 === 0).length;
+  const evenIn25 = last25.filter((d) => d % 2 === 0).length;
 
-  if (evenPercentage >= 52 && evenDigitsAbove11 >= 2 && strongestIsEven && evenIn20 >= 11) {
+  if (evenPercentage >= 52 && evenDigitsAbove11 >= 2 && strongestIsEven && evenIn25 >= 13 && topFavored === 'EVEN') {
     let consecutiveOdds = 0;
-    for (let i = last20.length - 1; i >= 0; i--) {
-      if (last20[i] % 2 !== 0) consecutiveOdds++;
+    for (let i = last25.length - 1; i >= 0; i--) {
+      if (last25[i] % 2 !== 0) consecutiveOdds++;
       else break;
     }
-    if (consecutiveOdds >= 3) {
+    if (consecutiveOdds >= 2) {
       return {
         type: 'pro_even_odd',
         label: 'Pro Even/Odd',
         status: 'TRADE NOW',
         probability: evenPercentage,
-        recommendation: `EVEN STRATEGY: ${consecutiveOdds} consecutive odds detected — Enter EVEN now!`,
-        entryCondition: 'Enter EVEN immediately after first even digit appears',
+        recommendation: `EVEN STRATEGY: ${consecutiveOdds} consecutive odds + aligned top digits — Enter EVEN!`,
+        entryCondition: '2+ consecutive ODD digits detected — enter EVEN on next even digit',
         tradeDirection: 'EVEN',
       };
     }
@@ -319,30 +494,30 @@ function proEvenOddSignal(a: AnalysisResult): Signal {
       label: 'Pro Even/Odd',
       status: 'WAIT',
       probability: evenPercentage,
-      recommendation: 'EVEN conditions met — Waiting for 3+ consecutive ODD digits',
-      entryCondition: 'Wait for 3+ consecutive ODD digits, then enter EVEN',
+      recommendation: 'EVEN conditions met — Waiting for 2+ consecutive ODD digits',
+      entryCondition: 'Wait for 2+ consecutive ODD digits, then enter EVEN',
       tradeDirection: 'EVEN',
     };
   }
 
   const oddDigitsAbove11 = [1, 3, 5, 7, 9].filter((d) => digitFrequencies[d].percentage >= 11).length;
   const strongestIsOdd = powerIndex.strongest % 2 !== 0;
-  const oddIn20 = last20.filter((d) => d % 2 !== 0).length;
+  const oddIn25 = last25.filter((d) => d % 2 !== 0).length;
 
-  if (oddPercentage >= 60 && oddDigitsAbove11 >= 2 && strongestIsOdd && oddIn20 >= 12) {
+  if (oddPercentage >= 52 && oddDigitsAbove11 >= 2 && strongestIsOdd && oddIn25 >= 13 && topFavored === 'ODD') {
     let consecutiveEvens = 0;
-    for (let i = last20.length - 1; i >= 0; i--) {
-      if (last20[i] % 2 === 0) consecutiveEvens++;
+    for (let i = last25.length - 1; i >= 0; i--) {
+      if (last25[i] % 2 === 0) consecutiveEvens++;
       else break;
     }
-    if (consecutiveEvens >= 3) {
+    if (consecutiveEvens >= 2) {
       return {
         type: 'pro_even_odd',
         label: 'Pro Even/Odd',
         status: 'TRADE NOW',
         probability: oddPercentage,
-        recommendation: `ODD STRATEGY: ${consecutiveEvens} consecutive evens — Enter ODD now!`,
-        entryCondition: 'Enter ODD immediately after first odd digit appears',
+        recommendation: `ODD STRATEGY: ${consecutiveEvens} consecutive evens + aligned top digits — Enter ODD!`,
+        entryCondition: '2+ consecutive EVEN digits detected — enter ODD on next odd digit',
         tradeDirection: 'ODD',
       };
     }
@@ -351,8 +526,8 @@ function proEvenOddSignal(a: AnalysisResult): Signal {
       label: 'Pro Even/Odd',
       status: 'WAIT',
       probability: oddPercentage,
-      recommendation: 'ODD conditions met — Waiting for 3+ consecutive EVEN digits',
-      entryCondition: 'Wait for 3+ consecutive EVEN digits, then enter ODD',
+      recommendation: 'ODD conditions met — Waiting for 2+ consecutive EVEN digits',
+      entryCondition: 'Wait for 2+ consecutive EVEN digits, then enter ODD',
       tradeDirection: 'ODD',
     };
   }
@@ -362,13 +537,13 @@ function proEvenOddSignal(a: AnalysisResult): Signal {
     label: 'Pro Even/Odd',
     status: 'NEUTRAL',
     probability: Math.max(evenPercentage, oddPercentage),
-    recommendation: 'Pro even/odd conditions not met',
-    entryCondition: 'Waiting for conditions',
+    recommendation: 'Pro even/odd conditions not met or top digits not aligned',
+    entryCondition: 'Waiting for alignment and 2+ consecutive opposite digits',
   };
 }
 
 function proOverUnderSignal(a: AnalysisResult): Signal {
-  const { digitFrequencies, highPercentage, lowPercentage, powerIndex, last20 } = a;
+  const { digitFrequencies, highPercentage, lowPercentage, powerIndex, last25, digitTrends } = a;
 
   const d0pct = digitFrequencies[0].percentage;
   const d1pct = digitFrequencies[1].percentage;
@@ -376,15 +551,22 @@ function proOverUnderSignal(a: AnalysisResult): Signal {
   const weakestIs01 = powerIndex.weakest === 0 || powerIndex.weakest === 1;
 
   if (d0pct < 10 && d1pct < 10 && above2WithMin11 >= 3 && weakestIs01 && highPercentage >= 58) {
-    const over1in20 = last20.filter((d) => d > 1).length;
-    if (over1in20 >= 18) {
+    const over1in25 = last25.filter((d) => d > 1).length;
+    if (over1in25 >= 22) {
+      // Auto-configure entry digit: highest increasing digit >=2
+      const highIncreasing = digitTrends
+        .filter(t => t.digit >= 2 && t.trendDirection === 'increasing')
+        .sort((x, y) => y.recentPercentage - x.recentPercentage);
+      const entryDigit = highIncreasing[0]?.digit ?? 2;
       return {
         type: 'pro_over_under',
         label: 'Pro Over/Under',
         status: 'TRADE NOW',
         probability: highPercentage,
-        recommendation: 'OVER 1 STRATEGY: Strong signal — 90%+ win rate detected!',
-        entryCondition: 'Wait for 1+ UNDER digits, then enter OVER 1 immediately',
+        recommendation: `OVER 1 STRATEGY: Strong signal — Entry digit ${entryDigit} (trend: ${digitTrends[entryDigit].trendDirection})`,
+        entryCondition: `Wait for 1+ UNDER digits, then enter OVER 1 on digit ${entryDigit}`,
+        targetDigit: entryDigit,
+        entryDigits: [2, 3, 4, 5],
         tradeDirection: 'OVER 1',
       };
     }
@@ -396,15 +578,22 @@ function proOverUnderSignal(a: AnalysisResult): Signal {
   const weakestIs89 = powerIndex.weakest === 8 || powerIndex.weakest === 9;
 
   if (d8pct < 10 && d9pct < 10 && under8WithMin11 >= 3 && weakestIs89 && lowPercentage >= 58) {
-    const under8in20 = last20.filter((d) => d < 8).length;
-    if (under8in20 >= 18) {
+    const under8in25 = last25.filter((d) => d < 8).length;
+    if (under8in25 >= 22) {
+      // Auto-configure entry digit: highest increasing digit <8
+      const lowIncreasing = digitTrends
+        .filter(t => t.digit < 8 && t.trendDirection === 'increasing')
+        .sort((x, y) => y.recentPercentage - x.recentPercentage);
+      const entryDigit = lowIncreasing[0]?.digit ?? 7;
       return {
         type: 'pro_over_under',
         label: 'Pro Over/Under',
         status: 'TRADE NOW',
         probability: lowPercentage,
-        recommendation: 'UNDER 8 STRATEGY: Strong signal — 90%+ win rate detected!',
-        entryCondition: 'Wait for 1+ OVER digits, then enter UNDER 8 immediately',
+        recommendation: `UNDER 8 STRATEGY: Strong signal — Entry digit ${entryDigit} (trend: ${digitTrends[entryDigit].trendDirection})`,
+        entryCondition: `Wait for 1+ OVER digits, then enter UNDER 8 on digit ${entryDigit}`,
+        targetDigit: entryDigit,
+        entryDigits: [7, 6, 5, 4],
         tradeDirection: 'UNDER 8',
       };
     }
