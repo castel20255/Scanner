@@ -227,33 +227,30 @@ function overUnderSignal(a: AnalysisResult): Signal {
   const max = Math.max(highPercentage, lowPercentage);
   const favored = highPercentage >= lowPercentage ? 'OVER' : 'UNDER';
 
-  // Auto-configure entry digit: use the strongest digit's trend
-  // If favored OVER, entry digit should be the strongest high digit (>=5)
-  // If favored UNDER, entry digit should be the strongest low digit (<=4)
+  // Allowed predictions: OVER 1,2,3 and UNDER 6,7,8 only
   const strongest = powerIndex.strongest;
   const strongestTrend = digitTrends[strongest];
 
-  // Determine the best entry digit based on direction and trend
+  const allowedOver = [1, 2, 3];
+  const allowedUnder = [6, 7, 8];
+
   let entryDigit: number;
   if (favored === 'OVER') {
-    // For OVER, pick the highest-frequency digit >=5 that is increasing
-    const highDigits = digitTrends
-      .filter(t => t.digit >= 5 && t.trendDirection === 'increasing')
+    const overCandidates = digitTrends
+      .filter(t => allowedOver.includes(t.digit) && t.trendDirection === 'increasing')
       .sort((x, y) => y.recentPercentage - x.recentPercentage);
-    entryDigit = highDigits[0]?.digit ?? strongest;
+    entryDigit = overCandidates[0]?.digit ?? allowedOver[0];
   } else {
-    // For UNDER, pick the highest-frequency digit <=4 that is increasing
-    const lowDigits = digitTrends
-      .filter(t => t.digit <= 4 && t.trendDirection === 'increasing')
+    const underCandidates = digitTrends
+      .filter(t => allowedUnder.includes(t.digit) && t.trendDirection === 'increasing')
       .sort((x, y) => y.recentPercentage - x.recentPercentage);
-    entryDigit = lowDigits[0]?.digit ?? strongest;
+    entryDigit = underCandidates[0]?.digit ?? allowedUnder[allowedUnder.length - 1];
   }
 
-  // Entry digits for user selection
   const entryDigits = favored === 'OVER'
-    ? [5, 6, 7, 8].filter(d => digitFrequencies[d].percentage >= 8)
-    : [4, 3, 2, 1].filter(d => digitFrequencies[d].percentage >= 8);
-  const fallbackDigits = favored === 'OVER' ? [5, 6, 7, 8] : [4, 3, 2, 1];
+    ? allowedOver.filter(d => digitFrequencies[d].percentage >= 8)
+    : allowedUnder.filter(d => digitFrequencies[d].percentage >= 8);
+  const fallbackDigits = favored === 'OVER' ? allowedOver : allowedUnder;
   const finalEntryDigits = entryDigits.length >= 2 ? entryDigits : fallbackDigits;
 
   if (max >= 56 && powerIndex.gap >= 10) {
@@ -555,9 +552,9 @@ function proOverUnderSignal(a: AnalysisResult): Signal {
     if (over1in25 >= 22) {
       // Auto-configure entry digit: highest increasing digit >=2
       const highIncreasing = digitTrends
-        .filter(t => t.digit >= 2 && t.trendDirection === 'increasing')
+        .filter(t => [1, 2, 3].includes(t.digit) && t.trendDirection === 'increasing')
         .sort((x, y) => y.recentPercentage - x.recentPercentage);
-      const entryDigit = highIncreasing[0]?.digit ?? 2;
+      const entryDigit = highIncreasing[0]?.digit ?? 1;
       return {
         type: 'pro_over_under',
         label: 'Pro Over/Under',
@@ -566,7 +563,7 @@ function proOverUnderSignal(a: AnalysisResult): Signal {
         recommendation: `OVER 1 STRATEGY: Strong signal — Entry digit ${entryDigit} (trend: ${digitTrends[entryDigit].trendDirection})`,
         entryCondition: `Wait for 1+ UNDER digits, then enter OVER 1 on digit ${entryDigit}`,
         targetDigit: entryDigit,
-        entryDigits: [2, 3, 4, 5],
+        entryDigits: [1, 2, 3],
         tradeDirection: 'OVER 1',
       };
     }
@@ -582,9 +579,9 @@ function proOverUnderSignal(a: AnalysisResult): Signal {
     if (under8in25 >= 22) {
       // Auto-configure entry digit: highest increasing digit <8
       const lowIncreasing = digitTrends
-        .filter(t => t.digit < 8 && t.trendDirection === 'increasing')
+        .filter(t => [6, 7, 8].includes(t.digit) && t.trendDirection === 'increasing')
         .sort((x, y) => y.recentPercentage - x.recentPercentage);
-      const entryDigit = lowIncreasing[0]?.digit ?? 7;
+      const entryDigit = lowIncreasing[0]?.digit ?? 8;
       return {
         type: 'pro_over_under',
         label: 'Pro Over/Under',
@@ -593,7 +590,7 @@ function proOverUnderSignal(a: AnalysisResult): Signal {
         recommendation: `UNDER 8 STRATEGY: Strong signal — Entry digit ${entryDigit} (trend: ${digitTrends[entryDigit].trendDirection})`,
         entryCondition: `Wait for 1+ OVER digits, then enter UNDER 8 on digit ${entryDigit}`,
         targetDigit: entryDigit,
-        entryDigits: [7, 6, 5, 4],
+        entryDigits: [6, 7, 8],
         tradeDirection: 'UNDER 8',
       };
     }
@@ -618,7 +615,7 @@ function under7Signal(a: AnalysisResult): Signal {
   const highDigitsBelow10 = [d7, d8, d9].filter((p) => p < 10).length;
   const under7in20 = last20.filter((d) => d <= 6).length;
 
-  const entryDigit = [7, 8, 9].reduce((best, d) =>
+  const entryDigit = [6, 7, 8].reduce((best, d) =>
     digitFrequencies[d].percentage > digitFrequencies[best].percentage ? d : best
   );
 
@@ -633,7 +630,7 @@ function under7Signal(a: AnalysisResult): Signal {
       recommendation: `Under 7: ${under7in20}/20 recent digits are 0-6. Entry on digit ${entryDigit}`,
       entryCondition: `Wait for digit ${entryDigit} to appear as entry trigger, then trade UNDER 7`,
       targetDigit: entryDigit,
-      entryDigits: [7, 8, 9],
+      entryDigits: [6, 7, 8],
       tradeDirection: 'UNDER 7',
     };
   } else if (highDigitsBelow10 >= 1 && under7in20 >= 12) {
@@ -667,7 +664,7 @@ function over2Signal(a: AnalysisResult): Signal {
   const lowDigitsBelow10 = [d0, d1, d2].filter((p) => p < 10).length;
   const over2in20 = last20.filter((d) => d >= 3).length;
 
-  const entryDigit = [0, 1, 2].reduce((best, d) =>
+  const entryDigit = [1, 2, 3].reduce((best, d) =>
     digitFrequencies[d].percentage > digitFrequencies[best].percentage ? d : best
   );
 
@@ -682,7 +679,7 @@ function over2Signal(a: AnalysisResult): Signal {
       recommendation: `Over 2: ${over2in20}/20 recent digits are 3-9. Entry on digit ${entryDigit}`,
       entryCondition: `Wait for digit ${entryDigit} to appear, then trade OVER 2`,
       targetDigit: entryDigit,
-      entryDigits: [1, 2, 3, 4],
+      entryDigits: [1, 2, 3],
       tradeDirection: 'OVER 2',
     };
   } else if (lowDigitsBelow10 >= 1 && over2in20 >= 12) {
