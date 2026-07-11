@@ -17,13 +17,16 @@ import {
   GripVertical,
   Orbit,
   Sparkles,
+  BarChart2,
 } from 'lucide-react';
+import MarketMonitor from './MarketMonitor';
 import { useDerivWS } from '../hooks/useDerivWS';
 import { analyzeMultiWindow, MultiWindowAnalysis } from '../lib/analysis';
 import { generateCombinedRankedSignals, Signal, SignalType } from '../lib/signals';
 import { SYMBOLS } from '../lib/symbols';
 
-type Step = 'orb' | 'config' | 'scanning' | 'result';
+type Step = 'orb' | 'open' | 'scanning';
+type PanelTab = 'scanner' | 'monitor';
 
 const TRADE_TYPES = [
   { id: 'over_under', label: 'Over / Under', types: ['over_under', 'pro_over_under', 'under_7', 'over_2'] as SignalType[] },
@@ -182,6 +185,7 @@ function DigitStat({ label, digit, percentage, color, badge }: { label: string; 
 
 // ─── StatsCard ────────────────────────────────────────────────────────────────
 function StatsCard({ mwa, tradeTypeId }: { mwa: MultiWindowAnalysis; tradeTypeId: string }) {
+  const [collapsed, setCollapsed] = useState(true);
   const a = mwa.w1000;
   const a120 = mwa.w120;
   const a15 = mwa.w15;
@@ -192,7 +196,11 @@ function StatsCard({ mwa, tradeTypeId }: { mwa: MultiWindowAnalysis; tradeTypeId
   return (
     <div className="rounded-2xl overflow-hidden border border-white/10"
       style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))', backdropFilter: 'blur(12px)' }}>
-      <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))' }}>
+      <button
+        onClick={() => setCollapsed(v => !v)}
+        className="w-full px-4 py-2.5 flex items-center justify-between select-none"
+        style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))' }}
+      >
         <div className="flex items-center gap-2">
           <Layers size={13} style={{ color: alignColor }} />
           <span className="text-xs font-bold text-white/70">Window Alignment</span>
@@ -212,83 +220,84 @@ function StatsCard({ mwa, tradeTypeId }: { mwa: MultiWindowAnalysis; tradeTypeId
           </div>
           <span className="text-xs font-black" style={{ color: alignColor }}>{mwa.alignmentScore}%</span>
           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full text-white" style={{ background: alignColor }}>{alignLabel}</span>
+          <ChevronDown size={12} className={`text-white/40 transition-transform ${collapsed ? '' : 'rotate-180'}`} />
         </div>
-      </div>
+      </button>
 
       <div className="h-1.5" style={{ background: 'rgba(255,255,255,0.05)' }}>
         <div className="h-full transition-all duration-700" style={{ width: `${mwa.alignmentScore}%`, background: `linear-gradient(90deg, ${alignColor}, ${alignColor}cc)` }} />
       </div>
 
-      <div className="p-4 space-y-4">
-        {tradeTypeId === 'even_odd' && (
-          <StatBar label="Even / Odd Split" leftLabel="EVEN" rightLabel="ODD" leftValue={a.evenPercentage} leftColor="#6366f1" rightColor="#ec4899" />
-        )}
-        {tradeTypeId === 'over_under' && (
-          <StatBar label="Over / Under 4.5" leftLabel="OVER" rightLabel="UNDR" leftValue={a.highPercentage} leftColor="#0ea5e9" rightColor="#f97316" />
-        )}
-        {tradeTypeId === 'matches' && (
-          <DigitStat label="Strongest Digit" digit={a.powerIndex.strongest} percentage={a.digitFrequencies[a.powerIndex.strongest]?.percentage ?? 0} color="#D61A8C" badge="MATCHES" />
-        )}
-        {tradeTypeId === 'differs' && (
-          <DigitStat label="Weakest Digit" digit={a.powerIndex.weakest} percentage={a.digitFrequencies[a.powerIndex.weakest]?.percentage ?? 0} color="#64748b" badge="DIFFERS" />
-        )}
-        {tradeTypeId === 'rise_fall' && (() => {
-          const q = a.last10quotes;
-          const rising = q.length >= 2 && q[q.length - 1] >= q[0];
-          return (
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">Trend Direction</span>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: rising ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)' }}>
-                {rising ? <TrendingUp size={14} className="text-green-400" /> : <TrendingDown size={14} className="text-red-400" />}
-                <span className="text-xs font-black" style={{ color: rising ? '#10b981' : '#ef4444' }}>{rising ? 'RISING' : 'FALLING'}</span>
-              </div>
-            </div>
-          );
-        })()}
+      {!collapsed && (
+        <>
+          <div className="p-4 space-y-4">
+            {tradeTypeId === 'even_odd' && (
+              <StatBar label="Even / Odd Split" leftLabel="EVEN" rightLabel="ODD" leftValue={a.evenPercentage} leftColor="#6366f1" rightColor="#ec4899" />
+            )}
+            {tradeTypeId === 'over_under' && (
+              <StatBar label="Over / Under 4.5" leftLabel="OVER" rightLabel="UNDR" leftValue={a.highPercentage} leftColor="#0ea5e9" rightColor="#f97316" />
+            )}
+            {tradeTypeId === 'matches' && (
+              <DigitStat label="Strongest Digit" digit={a.powerIndex.strongest} percentage={a.digitFrequencies[a.powerIndex.strongest]?.percentage ?? 0} color="#D61A8C" badge="MATCHES" />
+            )}
+            {tradeTypeId === 'differs' && (
+              <DigitStat label="Weakest Digit" digit={a.powerIndex.weakest} percentage={a.digitFrequencies[a.powerIndex.weakest]?.percentage ?? 0} color="#64748b" badge="DIFFERS" />
+            )}
+            {tradeTypeId === 'rise_fall' && (() => {
+              const q = a.last10quotes;
+              const rising = q.length >= 2 && q[q.length - 1] >= q[0];
+              return (
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">Trend Direction</span>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl" style={{ background: rising ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)' }}>
+                    {rising ? <TrendingUp size={14} className="text-green-400" /> : <TrendingDown size={14} className="text-red-400" />}
+                    <span className="text-xs font-black" style={{ color: rising ? '#10b981' : '#ef4444' }}>{rising ? 'RISING' : 'FALLING'}</span>
+                  </div>
+                </div>
+              );
+            })()}
 
-        {mwa.lastDigit !== null && (
-          <div className="flex items-center justify-between pt-1 border-t border-white/10">
-            <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">Last Digit</span>
-            <div className="flex items-center gap-1.5">
-              <Target size={12} className="text-white/40" />
-              <span className="text-base font-black text-white/80">{mwa.lastDigit}</span>
-              <span className="text-[9px] font-bold text-white/40">({mwa.lastDigit % 2 === 0 ? 'EVEN' : 'ODD'} · {mwa.lastDigit >= 5 ? 'HIGH' : 'LOW'})</span>
+            {mwa.lastDigit !== null && (
+              <div className="flex items-center justify-between pt-1 border-t border-white/10">
+                <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">Last Digit</span>
+                <div className="flex items-center gap-1.5">
+                  <Target size={12} className="text-white/40" />
+                  <span className="text-base font-black text-white/80">{mwa.lastDigit}</span>
+                  <span className="text-[9px] font-bold text-white/40">({mwa.lastDigit % 2 === 0 ? 'EVEN' : 'ODD'} · {mwa.lastDigit >= 5 ? 'HIGH' : 'LOW'})</span>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+              {([
+                { label: '1000T', a: a, color: '#6366f1' },
+                { label: '120T', a: a120, color: '#0ea5e9' },
+                { label: '15T', a: a15, color: '#D61A8C' },
+              ] as const).map(({ label, a: wa, color }) => {
+                const val = tradeTypeId === 'even_odd' ? wa.evenPercentage
+                  : tradeTypeId === 'over_under' ? wa.highPercentage
+                  : tradeTypeId === 'matches' ? ((wa.digitFrequencies[wa.powerIndex.strongest]?.percentage ?? 0) * 5) || 0
+                  : tradeTypeId === 'differs' ? 100 - wa.digitFrequencies[wa.powerIndex.weakest]?.percentage
+                  : 50;
+                return (
+                  <div key={label} className="rounded-xl p-2 text-center" style={{ background: `${color}10`, border: `1px solid ${color}30` }}>
+                    <div className="text-[9px] font-bold text-white/40 mb-0.5">{label}</div>
+                    <div className="text-sm font-black" style={{ color }}>{val.toFixed(1)}%</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        )}
-
-        <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-          {([
-            { label: '1000T', a: a, color: '#6366f1' },
-            { label: '120T', a: a120, color: '#0ea5e9' },
-            { label: '15T', a: a15, color: '#D61A8C' },
-          ] as const).map(({ label, a: wa, color }) => {
-            const val = tradeTypeId === 'even_odd' ? wa.evenPercentage
-              : tradeTypeId === 'over_under' ? wa.highPercentage
-              : tradeTypeId === 'matches' ? ((wa.digitFrequencies[wa.powerIndex.strongest]?.percentage ?? 0) * 5) || 0
-              : tradeTypeId === 'differs' ? 100 - wa.digitFrequencies[wa.powerIndex.weakest]?.percentage
-              : 50;
-            return (
-              <div key={label} className="rounded-xl p-2 text-center" style={{ background: `${color}10`, border: `1px solid ${color}30` }}>
-                <div className="text-[9px] font-bold text-white/40 mb-0.5">{label}</div>
-                <div className="text-sm font-black" style={{ color }}>{val.toFixed(1)}%</div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="flex justify-center">
-          <span className="text-[10px] text-white/40">
-            <span className="font-bold text-white/70">{a.totalTicks}</span> ticks collected
-          </span>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
 
 // ─── Signal Card ──────────────────────────────────────────────────────────────
-function UnifiedSignalCard({ signal, rank, selected, lastDigit }: { signal: Signal; rank: number; selected?: boolean; lastDigit: number | null }) {
+function UnifiedSignalCard({ signal, rank, selected, lastDigit, isTop, marketLabel }: {
+  signal: Signal; rank: number; selected?: boolean; lastDigit: number | null; isTop?: boolean; marketLabel?: string;
+}) {
   const isTradeNow = signal.status === 'TRADE NOW';
   const isWait = signal.status === 'WAIT';
   const entryMatch = signal.targetDigit !== undefined && lastDigit !== null && signal.targetDigit === lastDigit;
@@ -305,7 +314,7 @@ function UnifiedSignalCard({ signal, rank, selected, lastDigit }: { signal: Sign
     <div
       className="rounded-2xl border transition-all duration-200 cursor-pointer"
       style={{
-        borderColor: selected ? '#D61A8C' : signal.windowsAligned ? 'rgba(16,185,129,0.3)' : statusBorder,
+        borderColor: selected ? '#D61A8C' : (isTop && signal.windowsAligned) ? 'rgba(16,185,129,0.3)' : statusBorder,
         background: selected ? 'rgba(214,26,140,0.08)' : 'rgba(255,255,255,0.03)',
         backdropFilter: 'blur(8px)',
         boxShadow: selected ? '0 0 0 2px rgba(214,26,140,0.3)' : undefined,
@@ -320,13 +329,17 @@ function UnifiedSignalCard({ signal, rank, selected, lastDigit }: { signal: Sign
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] font-black text-white/50 uppercase tracking-wider">{signal.label}</span>
+              {marketLabel && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/20">{marketLabel}</span>
+              )}
               {signal.tradeDirection && (
                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
                   style={{ background: isTradeNow ? '#10b981' : '#f59e0b' }}>
                   {signal.tradeDirection}
                 </span>
               )}
-              {signal.windowsAligned && (
+              {/* Windows-aligned badge only on best (rank 1) signal */}
+              {isTop && signal.windowsAligned && (
                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-0.5">
                   <Check size={8} /> ALIGNED
                 </span>
@@ -394,11 +407,23 @@ export default function Scanner() {
   const [selectedSignal, setSelectedSignal] = useState<Signal | null>(null);
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const [predictionChoice, setPredictionChoice] = useState<number | null>(null); // Over 1/2/3/4 user selection
+  const [predictionChoice, setPredictionChoice] = useState<number | null>(null);
   const [autoScan, setAutoScan] = useState(false);
   const [lastAutoScan, setLastAutoScan] = useState<number | null>(null);
   const [signalShift, setSignalShift] = useState(false);
+  const [signalUpdated, setSignalUpdated] = useState(false);
+  const signalUpdatedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showTradeTypePicker, setShowTradeTypePicker] = useState(false);
+  const [activeTab, setActiveTab] = useState<PanelTab>('scanner');
+  // Bulk trade
+  const [bulkCount, setBulkCount] = useState('3');
+  const [showBulkPanel, setShowBulkPanel] = useState(false);
+  // Recovery mode
+  const [recMode, setRecMode] = useState(false);
+  const [recLossThreshold, setRecLossThreshold] = useState('3');
+  const [recAltType, setRecAltType] = useState('over_under');
+  const [showRecTypePicker, setShowRecTypePicker] = useState(false);
+  const recTypePickerRef = useRef<HTMLDivElement>(null);
   const tradeTypePickerRef = useRef<HTMLDivElement>(null);
   const prevSignalKeyRef = useRef<string>('');
   const shiftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -418,10 +443,19 @@ export default function Scanner() {
     if (!subscriptionState || subscriptionState.ticks.length < 20) return;
     const result = analyzeMultiWindow(subscriptionState.ticks, subscriptionState.quotes);
     setMwa(result);
-    const newSignals = generateCombinedRankedSignals(result, allowedTypes);
+    const allSignals = generateCombinedRankedSignals(result, allowedTypes);
+    // Only keep actionable signals (exclude WAIT / MONITOR status)
+    const newSignals = allSignals.filter(s => s.status === 'TRADE NOW');
     setCombinedSignals(newSignals);
 
-    // Signal shift detection: if the top signal's key changed, flag a shift
+    // If currently selected signal no longer exists in the new list, clear it
+    setSelectedSignal(prev => {
+      if (!prev) return null;
+      const still = newSignals.find(s => s.type === prev.type && s.tradeDirection === prev.tradeDirection);
+      return still ?? null;
+    });
+
+    // Signal shift detection
     const topSignal = newSignals[0];
     const currentKey = topSignal
       ? `${topSignal.type}__${topSignal.tradeDirection ?? ''}__${topSignal.status}`
@@ -432,6 +466,11 @@ export default function Scanner() {
       shiftTimeoutRef.current = setTimeout(() => setSignalShift(false), 5000);
     }
     prevSignalKeyRef.current = currentKey;
+
+    // Flash "UPDATED" badge
+    if (signalUpdatedTimer.current) clearTimeout(signalUpdatedTimer.current);
+    setSignalUpdated(true);
+    signalUpdatedTimer.current = setTimeout(() => setSignalUpdated(false), 2000);
   }, [subscriptionState?.ticks.length, allowedTypes]);
 
   const startScan = useCallback(() => {
@@ -451,7 +490,7 @@ export default function Scanner() {
       }
       if (i >= targets) {
         clearInterval(scanIntervalRef.current!);
-        setTimeout(() => setStep('result'), 600);
+        setTimeout(() => { setStep('open'); }, 600);
       }
     }, 400);
   }, [multiMarket, selectedSymbol, subscribeSymbol]);
@@ -470,6 +509,18 @@ export default function Scanner() {
     return () => { if (autoScanRef.current) clearInterval(autoScanRef.current); };
   }, [autoScan, runScanOnce]);
 
+  // Close rec type dropdown on outside click
+  useEffect(() => {
+    if (!showRecTypePicker) return;
+    const handler = (e: MouseEvent) => {
+      if (recTypePickerRef.current && !recTypePickerRef.current.contains(e.target as Node)) {
+        setShowRecTypePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showRecTypePicker]);
+
   // Close dropdown on outside click
   useEffect(() => {
     if (!showTradeTypePicker) return;
@@ -485,7 +536,7 @@ export default function Scanner() {
   // Auto-advance from orb → config once connected & ticks flow in
   useEffect(() => {
     if (step === 'orb' && isConnected && subscriptionState && subscriptionState.ticks.length >= 20) {
-      setStep('config');
+      setStep('open');
     }
   }, [step, isConnected, subscriptionState?.ticks.length]);
 
@@ -493,7 +544,8 @@ export default function Scanner() {
     if (scanIntervalRef.current) clearInterval(scanIntervalRef.current);
     if (shiftTimeoutRef.current) clearTimeout(shiftTimeoutRef.current);
     setSignalShift(false);
-    setStep('config');
+    setStep('open');
+    setActiveTab('scanner');
     setScanProgress(0);
     setMwa(null);
     setSelectedSignal(null);
@@ -503,15 +555,17 @@ export default function Scanner() {
   const handleLoadBot = useCallback(() => {
     const signalToUse = selectedSignal || combinedSignals[0] || null;
     const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
+    const tradeTypeLabel = TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? selectedTradeType;
     const xml = generateBotXML({
       stake, takeProfit, stopLoss, martingale,
-      symbol: selectedSymbol, bestSignal: signalToUse, entryDigit,
+      symbol: selectedSymbol, tradeTypeLabel, bestSignal: signalToUse, entryDigit,
     });
     const blob = new Blob([xml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `autoai_bot_${selectedSymbol}.xml`;
+    const tradeLabel = TRADE_TYPES.find(t => t.id === selectedTradeType)?.label?.replace(/[\s/]/g, '_') ?? selectedTradeType;
+    a.download = `autoai_${tradeLabel}_${selectedSymbol}.xml`;
     a.click();
     URL.revokeObjectURL(url);
   }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals, predictionChoice]);
@@ -522,24 +576,16 @@ export default function Scanner() {
   // Clicking orb toggles the panel
   const handleOrbClick = useCallback(() => {
     if (orb.isDragging) return;
-    if (step === 'orb') { setStep('config'); }
-    else { setStep('orb'); setMinimized(false); }
+    if (step === 'orb') setStep('open');
+    // Do NOT close on orb click — only Cancel button closes
   }, [orb.isDragging, step]);
 
-  // Close panel when clicking outside
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (step === 'orb') return;
-      const target = e.target as Node;
-      if (orb.ref.current?.contains(target)) return;
-      if (panelRef.current?.contains(target)) return;
-      setStep('orb');
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [step, orb.ref]);
+  // Panel never closes on outside click — only the Cancel/X button closes it
+  // (orb click opens it, Cancel closes it)
 
-  // ── Floating Orb (always visible) ──
+  // ── Floating AI Scanner Orb ──
+  const isActive = step !== 'orb';
+  const hasScanResults = mwa !== null || combinedSignals.length > 0;
   const orbEl = (
     <div
       ref={orb.ref}
@@ -553,62 +599,54 @@ export default function Scanner() {
         touchAction: 'none',
       }}
     >
-      {/* Semi-circle bubble glow — rotating arc */}
-      <div className="absolute -inset-3 rounded-full pointer-events-none"
+      {/* Signal ripple rings (active only) */}
+      {isActive && (
+        <>
+          <div className="absolute inset-0 m-auto rounded-full pointer-events-none"
+            style={{ width: 72, height: 72, animation: 'signal-ripple 2s ease-out infinite', background: 'transparent', border: '1.5px solid rgba(56,189,248,0.6)' }} />
+          <div className="absolute inset-0 m-auto rounded-full pointer-events-none"
+            style={{ width: 72, height: 72, animation: 'signal-ripple 2s ease-out 0.7s infinite', background: 'transparent', border: '1.5px solid rgba(0,93,255,0.4)' }} />
+        </>
+      )}
+
+      {/* Outer ambient glow */}
+      <div className="absolute pointer-events-none"
         style={{
-          background: 'radial-gradient(circle, rgba(214,26,140,0.22) 0%, transparent 70%)',
+          width: 96, height: 96, top: -12, left: -12,
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(56,189,248,0.22) 0%, rgba(0,93,255,0.1) 55%, transparent 75%)',
           animation: 'orb-pulse 3s ease-in-out infinite',
         }} />
 
-      {/* Rotating semi-circle arc (top hemisphere glow) */}
-      <div className="absolute -inset-2 rounded-full pointer-events-none overflow-hidden"
-        style={{ animation: 'orb-arc-spin 6s linear infinite' }}>
-        <div className="absolute inset-0 rounded-full"
-          style={{
-            background: 'conic-gradient(from 0deg, transparent 0deg, rgba(214,26,140,0.55) 60deg, rgba(255,77,141,0.75) 120deg, transparent 180deg, transparent 360deg)',
-            maskImage: 'radial-gradient(circle, transparent 56%, black 58%, black 78%, transparent 80%)',
-            WebkitMaskImage: 'radial-gradient(circle, transparent 56%, black 58%, black 78%, transparent 80%)',
-          }} />
-      </div>
+      {/* Loader orb */}
+      <div className="relative" style={{ width: 72, height: 72 }}>
 
-      {/* Counter-rotating ring */}
-      <div className="absolute -inset-5 rounded-full pointer-events-none"
-        style={{
-          border: '1px solid rgba(214,26,140,0.18)',
-          borderTopColor: 'rgba(255,77,141,0.5)',
-          borderRightColor: 'transparent',
-          borderBottomColor: 'transparent',
-          borderLeftColor: 'rgba(214,26,140,0.25)',
-          animation: 'orb-ring-spin 8s linear infinite',
-        }} />
-
-      {/* Main orb body */}
-      <div
-        className="relative w-[72px] h-[72px] rounded-full flex items-center justify-center transition-shadow duration-300"
-        style={{
-          background: 'radial-gradient(circle at 40% 30%, #ff4d8d 0%, #D61A8C 40%, #8E44AD 80%, #5a1a6a 100%)',
-          boxShadow: orb.isDragging
-            ? '0 0 40px rgba(214,26,140,0.6), 0 8px 32px rgba(0,0,0,0.4), inset 0 2px 8px rgba(255,255,255,0.3)'
-            : '0 0 30px rgba(214,26,140,0.4), 0 4px 20px rgba(0,0,0,0.3), inset 0 2px 8px rgba(255,255,255,0.3)',
-          border: '1px solid rgba(255,255,255,0.25)',
-        }}
-      >
-        {/* Inner shine */}
-        <div className="absolute top-1 left-3 right-3 h-6 rounded-full pointer-events-none"
-          style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.5) 0%, transparent 100%)' }} />
-
-        {/* Content */}
-        {step === 'orb' ? (
-          <div className="flex flex-col items-center leading-none">
-            <Orbit size={22} className="text-white/90" />
-            <span className="text-[8px] font-black text-white/80 mt-0.5 tracking-wider">SCAN</span>
+        {/* Core orb — uiverse loader (joao-canais) */}
+        <div className="loader-wrapper">
+          <div className="loader-circle" />
+          {/* Inner content */}
+          <div className="relative z-10 flex flex-col items-center leading-none">
+            {step === 'orb' ? (
+              <>
+                <Orbit size={20} className="text-white/95" style={{ filter: 'drop-shadow(0 0 4px rgba(56,189,248,0.9))' }} />
+                <span className="text-[7px] font-black text-white mt-0.5 tracking-widest">SCAN</span>
+              </>
+            ) : step === 'scanning' ? (
+              <div className="flex items-end gap-[2px] h-4">
+                {[0, 1, 2, 3].map(i => (
+                  <div key={i} className="w-[3px] rounded-full bg-sky-300"
+                    style={{ height: 14, animation: `dot-bounce 1s ease-in-out ${i * 0.12}s infinite`, boxShadow: '0 0 4px rgba(56,189,248,0.9)' }} />
+                ))}
+              </div>
+            ) : (
+              <>
+                <Sparkles size={18} className="text-sky-200" style={{ filter: 'drop-shadow(0 0 4px rgba(56,189,248,0.9))' }} />
+                <span className="text-[7px] font-black text-sky-100 mt-0.5 tracking-widest">LIVE</span>
+              </>
+            )}
           </div>
-        ) : (
-          <div className="flex flex-col items-center leading-none">
-            <Sparkles size={18} className="text-white/90" />
-            <span className="text-[8px] font-black text-white/80 mt-0.5 tracking-wider">LIVE</span>
-          </div>
-        )}
+        </div>
+
       </div>
     </div>
   );
@@ -658,297 +696,416 @@ export default function Scanner() {
         </div>
       </div>
 
-      {/* Content */}
+      {/* Tab bar */}
       {!minimized && (
-        <div className="p-5 space-y-4" style={{ background: 'linear-gradient(180deg, transparent, rgba(255,255,255,0.02))' }}>
-          {/* Symbol selector */}
-          <div>
-            <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block mb-1">Market</label>
-            <div className="relative">
-              <button
-                onClick={() => setShowSymbolPicker((v) => !v)}
-                className="w-full flex items-center justify-between border rounded-xl px-4 py-2.5 transition"
-                style={{ borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
-              >
-                <span className="font-bold text-white/80 text-sm">{selectedSymbolInfo?.label ?? selectedSymbol}</span>
-                <ChevronDown size={14} className={`text-white/40 transition-transform ${showSymbolPicker ? 'rotate-180' : ''}`} />
-              </button>
-              {showSymbolPicker && (
-                <div className="absolute z-20 top-full left-0 right-0 mt-1 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto"
-                  style={{ background: 'rgba(15,10,30,0.98)', border: '1px solid rgba(255,255,255,0.12)', backdropFilter: 'blur(20px)' }}>
-                  {['Volatility', 'Crash/Boom', 'Jump', 'Bear/Bull', 'Range', 'Step'].map((cat) => (
-                    <div key={cat}>
-                      <div className="px-4 py-1.5 text-[10px] font-bold text-white/40 uppercase tracking-wider sticky top-0" style={{ background: 'rgba(255,255,255,0.06)' }}>
-                        {cat}
-                      </div>
-                      {SYMBOLS.filter((s) => s.category === cat).map((s) => (
-                        <button
-                          key={s.id}
-                          onClick={() => { setSelectedSymbol(s.id); setShowSymbolPicker(false); }}
-                          className={`w-full text-left px-4 py-2 text-sm font-medium transition ${selectedSymbol === s.id ? 'text-[#D61A8C] font-bold' : 'text-white/70 hover:bg-white/5'}`}
-                          style={selectedSymbol === s.id ? { background: 'rgba(214,26,140,0.12)' } : {}}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Trade type */}
-          <div>
-            <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block mb-2">Trade Type</label>
-            <div className="relative" ref={tradeTypePickerRef}>
-              <button
-                onClick={() => setShowTradeTypePicker(v => !v)}
-                className="w-full border rounded-xl p-2.5 text-xs font-bold text-left flex items-center justify-between transition"
-                style={{ borderColor: '#D61A8C', color: '#D61A8C', background: 'rgba(214,26,140,0.12)' }}
-              >
-                <span>{TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? 'Select'}</span>
-                <ChevronDown size={14} className={showTradeTypePicker ? 'rotate-180 transition-transform' : 'transition-transform'} />
-              </button>
-              {showTradeTypePicker && (
-                <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#1a0a14] shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
-                  {TRADE_TYPES.map(t => (
-                    <button
-                      key={t.id}
-                      onClick={() => { setSelectedTradeType(t.id); setSelectedSignal(null); setShowTradeTypePicker(false); }}
-                      className="w-full px-3 py-2 text-xs font-bold text-left transition flex items-center justify-between hover:bg-white/5"
-                      style={
-                        selectedTradeType === t.id
-                          ? { color: '#D61A8C', background: 'rgba(214,26,140,0.12)' }
-                          : { color: 'rgba(255,255,255,0.6)' }
-                      }
-                    >
-                      <span>{t.label}</span>
-                      {selectedTradeType === t.id && <Check size={12} />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Parameters */}
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: 'Stake ($)', value: stake, setter: setStake },
-              { label: 'Martingale x', value: martingale, setter: setMartingale },
-              { label: 'Take Profit ($)', value: takeProfit, setter: setTakeProfit },
-              { label: 'Stop Loss (losses)', value: stopLoss, setter: setStopLoss },
-            ].map(({ label, value, setter }) => (
-              <div key={label}>
-                <label className="text-[9px] font-bold text-white/50 uppercase tracking-wider block mb-1">{label}</label>
-                <input
-                  type="number"
-                  value={value}
-                  onChange={(e) => setter(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2 text-white/80 font-bold text-sm focus:outline-none focus:ring-2 transition"
-                  style={{ borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)', boxShadow: 'none' }}
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Multi-market */}
-          <div className="rounded-xl p-3 flex items-center justify-between"
-            style={{ border: '1px solid rgba(230,126,34,0.2)', background: 'rgba(230,126,34,0.06)' }}>
-            <div>
-              <h4 className="text-[#E67E22] font-bold text-xs">Multi-Market Scan</h4>
-              <p className="text-[10px] text-white/40">Scan all synthetic markets</p>
-            </div>
+        <div className="flex border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          {([
+            { id: 'scanner', label: 'Scanner' },
+            { id: 'monitor', label: 'Market Monitor' },
+          ] as { id: PanelTab; label: string }[]).map(tab => (
             <button
-              onClick={() => setMultiMarket((v) => !v)}
-              className={`w-11 h-6 flex items-center rounded-full p-0.5 transition-colors duration-300 ${multiMarket ? 'bg-[#D61A8C]' : 'bg-white/20'}`}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="flex-1 py-2.5 text-[11px] font-black tracking-wide transition relative"
+              style={{ color: activeTab === tab.id ? '#fff' : 'rgba(255,255,255,0.35)' }}
             >
-              <div className={`bg-white w-5 h-5 rounded-full shadow transform transition-transform duration-300 ${multiMarket ? 'translate-x-5' : 'translate-x-0'}`} />
-            </button>
-          </div>
-
-          {/* Scanning progress */}
-          {step === 'scanning' && (
-            <div className="space-y-3">
-              <div className="rounded-xl p-3" style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)' }}>
-                <div className="flex justify-between text-xs font-bold text-white/70 mb-2">
-                  <span>Synthetic Indices</span>
-                  <span>{scanProgress}/{scanTarget}</span>
-                </div>
-                <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                  <div className="h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${(scanProgress / scanTarget) * 100}%`, background: 'linear-gradient(90deg, #D61A8C, #E67E22)' }} />
-                </div>
-              </div>
-              <div className="w-full text-white font-bold text-center py-3 rounded-xl text-xs flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(90deg, #E67E22, #D61A8C, #8E44AD)' }}>
-                <RefreshCw size={14} className="animate-spin" />
-                Collecting 1000 ticks across 3 windows...
-              </div>
-            </div>
-          )}
-
-          {/* Config action */}
-          {step === 'config' && (
-            <div className="space-y-3 pt-1">
-              {/* Continuous scanner toggle */}
-              <button
-                onClick={() => setAutoScan(a => !a)}
-                className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 border transition active:scale-95"
-                style={{
-                  borderColor: autoScan ? 'rgba(214,26,140,0.5)' : 'rgba(255,255,255,0.15)',
-                  background: autoScan ? 'rgba(214,26,140,0.12)' : 'rgba(255,255,255,0.05)',
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  <RefreshCw size={13} className={autoScan ? 'animate-spin text-[#D61A8C]' : 'text-white/40'} />
-                  <span className="text-xs font-bold text-white/80">Continuous scan (60s)</span>
-                </div>
-                <span className="text-[9px] font-black px-2 py-0.5 rounded-full"
-                  style={{ background: autoScan ? '#D61A8C' : 'rgba(255,255,255,0.15)', color: '#fff' }}>
-                  {autoScan ? 'ON' : 'OFF'}
-                </span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={resetScan}
-                  className="border-2 rounded-xl font-bold py-3 transition active:scale-95 text-sm"
-                  style={{ borderColor: 'rgba(142,68,173,0.5)', color: 'rgba(255,255,255,0.6)', background: 'transparent' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={startScan}
-                  disabled={!isConnected}
-                  className="text-white font-bold py-3 rounded-xl shadow-lg transition active:scale-95 text-sm disabled:opacity-50"
-                  style={{ background: 'linear-gradient(135deg, #E67E22, #D61A8C)' }}
-                >
-                  {isConnected ? 'Scan Markets' : 'Connecting...'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Result */}
-          {step === 'result' && (
-            <div className="space-y-4">
-              {mwa && <StatsCard mwa={mwa} tradeTypeId={selectedTradeType} />}
-
-              {selectedSignal && (
-                <div className="rounded-2xl p-3 flex items-center justify-between gap-3"
-                  style={{ background: 'linear-gradient(135deg, rgba(214,26,140,0.12), rgba(142,68,173,0.08))', border: '1.5px solid rgba(214,26,140,0.3)' }}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <Check size={12} className="text-green-400" />
-                      <span className="text-xs font-black text-[#D61A8C]">Selected Signal</span>
-                    </div>
-                    <p className="text-xs font-bold text-white/70 truncate">{selectedSignal.recommendation}</p>
-                  </div>
-                  <span className="shrink-0 text-[10px] font-black px-2.5 py-1 rounded-xl text-white"
-                    style={{ background: 'linear-gradient(135deg, #D61A8C, #8E44AD)' }}>
-                    {selectedSignal.tradeDirection ?? selectedSignal.label}
-                  </span>
-                </div>
+              {tab.label}
+              {activeTab === tab.id && (
+                <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full"
+                  style={{ background: 'linear-gradient(90deg,#D61A8C,#E67E22)' }} />
               )}
+            </button>
+          ))}
+        </div>
+      )}
 
+      {/* Tab content */}
+      {!minimized && (
+        <>
+          {/* ── SCANNER TAB ── */}
+          {activeTab === 'scanner' && (
+            <div className="p-5 space-y-4" style={{ background: 'linear-gradient(180deg, transparent, rgba(255,255,255,0.02))' }}>
+              {/* Symbol selector */}
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">
-                    Ranked Signals · {combinedSignals.length} found
-                  </span>
-                  <div className="flex items-center gap-2">
-                    {signalShift && (
-                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1 animate-pulse">
-                        <AlertTriangle size={8} /> Signal Shift — Bots Paused
-                      </span>
-                    )}
-                    {mwa?.aligned && (
-                      <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-1">
-                        <Zap size={8} /> All windows aligned
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Over/Under prediction picker — entry digits for the bot */}
-                {selectedSignal && (selectedSignal.type === 'over' || selectedSignal.type === 'pro_over')
-                  && (() => {
-                    const digits = selectedSignal.entryDigits ?? [];
-                    if (!digits.length) return null;
-                    return (
-                      <div className="rounded-xl border p-3 mb-2"
-                        style={{ borderColor: 'rgba(214,26,140,0.35)', background: 'rgba(214,26,140,0.06)' }}>
-                        <div className="flex items-center gap-1.5 mb-2">
-                          <TrendingUp size={11} className="text-[#D61A8C]" />
-                          <span className="text-[10px] font-black text-white/80 uppercase tracking-wide">Set Prediction</span>
-                          <span className="text-[9px] text-white/40 ml-auto">Bot will use entry digit</span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-2">
-                          {digits.map((d) => (
-                            <button key={d} onClick={() => setPredictionChoice(d)}
-                              className="rounded-lg py-2 text-center font-black transition active:scale-95"
-                              style={{
-                                background: predictionChoice === d ? 'linear-gradient(135deg, #E67E22, #D61A8C)' : 'rgba(255,255,255,0.05)',
-                                color: predictionChoice === d ? '#fff' : 'rgba(255,255,255,0.6)',
-                                border: predictionChoice === d ? '1px solid #D61A8C' : '1px solid rgba(255,255,255,0.1)',
-                              }}>
-                              <span className="block text-base leading-none">OVER</span>
-                              <span className="block text-xs mt-0.5">{d}</span>
+                <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block mb-1">Market</label>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowSymbolPicker((v) => !v)}
+                    className="w-full flex items-center justify-between border rounded-xl px-4 py-2.5 transition"
+                    style={{ borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
+                  >
+                    <span className="font-bold text-white/80 text-sm">{selectedSymbolInfo?.label ?? selectedSymbol}</span>
+                    <ChevronDown size={14} className={`text-white/40 transition-transform ${showSymbolPicker ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showSymbolPicker && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto"
+                      style={{ background: 'rgba(15,10,30,0.98)', border: '1px solid rgba(255,255,255,0.12)', backdropFilter: 'blur(20px)' }}>
+                      {['Volatility', 'Crash/Boom', 'Jump', 'Bear/Bull', 'Range', 'Step'].map((cat) => (
+                        <div key={cat}>
+                          <div className="px-4 py-1.5 text-[10px] font-bold text-white/40 uppercase tracking-wider sticky top-0" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                            {cat}
+                          </div>
+                          {SYMBOLS.filter((s) => s.category === cat).map((s) => (
+                            <button
+                              key={s.id}
+                              onClick={() => { setSelectedSymbol(s.id); setShowSymbolPicker(false); }}
+                              className={`w-full text-left px-4 py-2 text-sm font-medium transition ${selectedSymbol === s.id ? 'text-[#D61A8C] font-bold' : 'text-white/70 hover:bg-white/5'}`}
+                              style={selectedSymbol === s.id ? { background: 'rgba(214,26,140,0.12)' } : {}}
+                            >
+                              {s.label}
                             </button>
                           ))}
                         </div>
-                      </div>
-                    );
-                  })()}
-
-                <div className="space-y-2 max-h-96 overflow-y-auto pr-0.5">
-                  {combinedSignals.length > 0
-                    ? combinedSignals.map((s, i) => (
-                        <button
-                          key={`${s.type}-${s.tradeDirection}-${i}`}
-                          onClick={() => setSelectedSignal(s)}
-                          className="w-full text-left"
-                        >
-                          <UnifiedSignalCard signal={s} rank={i + 1} selected={selectedSignal === s} lastDigit={lastDigit} />
-                        </button>
-                      ))
-                    : (
-                        <div className="rounded-2xl border p-6 text-center" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
-                          <AlertTriangle size={20} className="text-white/20 mx-auto mb-2" />
-                          <p className="text-sm font-bold text-white/50">No signals detected yet</p>
-                          <p className="text-[10px] text-white/30 mt-1">Collecting more ticks...</p>
-                        </div>
-                      )}
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                <button onClick={resetScan} className="border rounded-xl text-white/60 text-xs font-black py-3 transition active:scale-95"
-                  style={{ borderColor: 'rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)' }}>
-                  New Scan
-                </button>
-                <button onClick={handleLoadBot} className="bg-green-500 hover:bg-green-600 text-white text-xs font-black py-3 rounded-xl transition active:scale-95 shadow flex items-center justify-center gap-1">
-                  <Download size={12} />
-                  Load Bot
-                </button>
-                <button onClick={handleLoadBot} className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 shadow flex items-center justify-center gap-1"
-                  style={{ background: 'linear-gradient(135deg, #E67E22, #8E44AD)' }}>
-                  <Play size={12} />
-                  Load & Run
+              {/* Trade type */}
+              <div>
+                <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block mb-2">Trade Type</label>
+                <div className="relative" ref={tradeTypePickerRef}>
+                  <button
+                    onClick={() => setShowTradeTypePicker(v => !v)}
+                    className="w-full border rounded-xl p-2.5 text-xs font-bold text-left flex items-center justify-between transition"
+                    style={{ borderColor: '#D61A8C', color: '#D61A8C', background: 'rgba(214,26,140,0.12)' }}
+                  >
+                    <span>{TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? 'Select'}</span>
+                    <ChevronDown size={14} className={showTradeTypePicker ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                  </button>
+                  {showTradeTypePicker && (
+                    <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#1a0a14] shadow-2xl overflow-hidden max-h-72 overflow-y-auto">
+                      {TRADE_TYPES.map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => { setSelectedTradeType(t.id); setSelectedSignal(null); setShowTradeTypePicker(false); }}
+                          className="w-full px-3 py-2 text-xs font-bold text-left transition flex items-center justify-between hover:bg-white/5"
+                          style={selectedTradeType === t.id ? { color: '#D61A8C', background: 'rgba(214,26,140,0.12)' } : { color: 'rgba(255,255,255,0.6)' }}
+                        >
+                          <span>{t.label}</span>
+                          {selectedTradeType === t.id && <Check size={12} />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Parameters */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: 'Stake ($)', value: stake, setter: setStake },
+                  { label: 'Martingale x', value: martingale, setter: setMartingale },
+                  { label: 'Take Profit ($)', value: takeProfit, setter: setTakeProfit },
+                  { label: 'Stop Loss (losses)', value: stopLoss, setter: setStopLoss },
+                ].map(({ label, value, setter }) => (
+                  <div key={label}>
+                    <label className="text-[9px] font-bold text-white/50 uppercase tracking-wider block mb-1">{label}</label>
+                    <input
+                      type="number"
+                      value={value}
+                      onChange={(e) => setter(e.target.value)}
+                      className="w-full border rounded-xl px-3 py-2 text-white/80 font-bold text-sm focus:outline-none transition"
+                      style={{ borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)' }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Multi-market */}
+              <div className="rounded-xl p-3 flex items-center justify-between"
+                style={{ border: '1px solid rgba(230,126,34,0.2)', background: 'rgba(230,126,34,0.06)' }}>
+                <div>
+                  <h4 className="text-[#E67E22] font-bold text-xs">Multi-Market Scan</h4>
+                  <p className="text-[10px] text-white/40">Scan all synthetic markets</p>
+                </div>
+                <button
+                  onClick={() => setMultiMarket((v) => !v)}
+                  className={`w-11 h-6 flex items-center rounded-full p-0.5 transition-colors duration-300 ${multiMarket ? 'bg-[#D61A8C]' : 'bg-white/20'}`}
+                >
+                  <div className={`bg-white w-5 h-5 rounded-full shadow transform transition-transform duration-300 ${multiMarket ? 'translate-x-5' : 'translate-x-0'}`} />
                 </button>
               </div>
+
+              {/* Scanning progress */}
+              {step === 'scanning' && (
+                <div className="space-y-3">
+                  <div className="rounded-xl p-3" style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="flex justify-between text-xs font-bold text-white/70 mb-2">
+                      <span>Synthetic Indices</span>
+                      <span>{scanProgress}/{scanTarget}</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                      <div className="h-full transition-all duration-300 rounded-full"
+                        style={{ width: `${(scanProgress / scanTarget) * 100}%`, background: 'linear-gradient(90deg, #D61A8C, #E67E22)' }} />
+                    </div>
+                  </div>
+                  <div className="w-full text-white font-bold text-center py-3 rounded-xl text-xs flex items-center justify-center gap-2"
+                    style={{ background: 'linear-gradient(90deg, #E67E22, #D61A8C, #8E44AD)' }}>
+                    <RefreshCw size={14} className="animate-spin" />
+                    Collecting 1000 ticks across 3 windows...
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              {step !== 'scanning' && (
+                <div className="space-y-3 pt-1">
+                  <button
+                    onClick={() => setAutoScan(a => !a)}
+                    className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 border transition active:scale-95"
+                    style={{
+                      borderColor: autoScan ? 'rgba(214,26,140,0.5)' : 'rgba(255,255,255,0.15)',
+                      background: autoScan ? 'rgba(214,26,140,0.12)' : 'rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <RefreshCw size={13} className={autoScan ? 'animate-spin text-[#D61A8C]' : 'text-white/40'} />
+                      <span className="text-xs font-bold text-white/80">Continuous scan (60s)</span>
+                    </div>
+                    <span className="text-[9px] font-black px-2 py-0.5 rounded-full"
+                      style={{ background: autoScan ? '#D61A8C' : 'rgba(255,255,255,0.15)', color: '#fff' }}>
+                      {autoScan ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={resetScan}
+                      className="border-2 rounded-xl font-bold py-3 transition active:scale-95 text-sm"
+                      style={{ borderColor: 'rgba(142,68,173,0.5)', color: 'rgba(255,255,255,0.6)', background: 'transparent' }}
+                    >
+                      Reset
+                    </button>
+                    <button
+                      onClick={startScan}
+                      disabled={!isConnected}
+                      className="text-white font-bold py-3 rounded-xl shadow-lg transition active:scale-95 text-sm disabled:opacity-50"
+                      style={{ background: 'linear-gradient(135deg, #E67E22, #D61A8C)' }}
+                    >
+                      {isConnected ? 'Scan' : 'Connecting...'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Signals (inline in Scanner tab) ── */}
+              {hasScanResults && (
+                <>
+                  <div className="pt-2">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className="text-[10px] font-bold text-white/50 uppercase tracking-wider">
+                        Signals · {combinedSignals.length} active
+                      </span>
+                      {signalUpdated && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 flex items-center gap-1">
+                          <Zap size={7} /> LIVE
+                        </span>
+                      )}
+                      {signalShift && (
+                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1 animate-pulse">
+                          <AlertTriangle size={8} /> Shift
+                        </span>
+                      )}
+                      {combinedSignals[0]?.windowsAligned && (
+                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-1">
+                          <Zap size={8} /> Aligned
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {mwa && <StatsCard mwa={mwa} tradeTypeId={selectedTradeType} />}
+
+                  {selectedSignal && (
+                    <div className="rounded-2xl p-3 flex items-center justify-between gap-3"
+                      style={{ background: 'linear-gradient(135deg, rgba(214,26,140,0.12), rgba(142,68,173,0.08))', border: '1.5px solid rgba(214,26,140,0.3)' }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <Check size={12} className="text-green-400" />
+                          <span className="text-xs font-black text-[#D61A8C]">Selected Signal</span>
+                        </div>
+                        <p className="text-xs font-bold text-white/70 truncate">{selectedSignal.recommendation}</p>
+                      </div>
+                      <span className="shrink-0 text-[10px] font-black px-2.5 py-1 rounded-xl text-white"
+                        style={{ background: 'linear-gradient(135deg, #D61A8C, #8E44AD)' }}>
+                        {selectedSignal.tradeDirection ?? selectedSignal.label}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Bulk Trade */}
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+                    <button onClick={() => setShowBulkPanel(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-white/70 hover:text-white transition">
+                      <span className="flex items-center gap-2">
+                        <BarChart2 size={12} className="text-sky-400" />
+                        Bulk Trade
+                        {showBulkPanel && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300">{bulkCount}x</span>}
+                      </span>
+                      <ChevronDown size={12} className={showBulkPanel ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                    </button>
+                    {showBulkPanel && (
+                      <div className="px-3 pb-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-white/50 w-24 shrink-0">No. of trades</label>
+                          <input type="number" min={1} max={20} value={bulkCount} onChange={e => setBulkCount(e.target.value)}
+                            className="flex-1 rounded-lg px-2 py-1 text-xs font-bold text-white text-center border"
+                            style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.12)' }} />
+                        </div>
+                        <button className="w-full py-2 rounded-xl text-xs font-black text-white transition active:scale-95"
+                          style={{ background: 'linear-gradient(135deg, #0ea5e9, #6366f1)' }}
+                          onClick={() => { setBulkCount(String(Math.max(1, Math.min(20, parseInt(bulkCount) || 3)))); setShowBulkPanel(false); }}>
+                          Queue {bulkCount} Trades
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Recovery Mode */}
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: recMode ? 'rgba(245,158,11,0.35)' : 'rgba(255,255,255,0.08)', background: recMode ? 'rgba(245,158,11,0.04)' : 'rgba(255,255,255,0.03)' }}>
+                    <button onClick={() => setRecMode(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold transition"
+                      style={{ color: recMode ? '#f59e0b' : 'rgba(255,255,255,0.7)' }}>
+                      <span className="flex items-center gap-2">
+                        <RefreshCw size={12} style={{ color: recMode ? '#f59e0b' : 'rgba(255,255,255,0.5)' }} />
+                        Recovery Mode
+                        {recMode && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300">ON</span>}
+                      </span>
+                      <ChevronDown size={12} className={recMode ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                    </button>
+                    {recMode && (
+                      <div className="px-3 pb-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-white/50 w-24 shrink-0">Loss threshold</label>
+                          <input type="number" min={1} max={10} value={recLossThreshold} onChange={e => setRecLossThreshold(e.target.value)}
+                            className="flex-1 rounded-lg px-2 py-1 text-xs font-bold text-white text-center border"
+                            style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.12)' }} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-white/50 w-24 shrink-0">Alt trade type</label>
+                          <div className="flex-1 relative" ref={recTypePickerRef}>
+                            <button onClick={() => setShowRecTypePicker(v => !v)}
+                              className="w-full rounded-lg px-2 py-1 text-xs font-bold text-left flex items-center justify-between border"
+                              style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(245,158,11,0.3)', color: '#f59e0b' }}>
+                              <span>{TRADE_TYPES.find(t => t.id === recAltType)?.label ?? recAltType}</span>
+                              <ChevronDown size={10} />
+                            </button>
+                            {showRecTypePicker && (
+                              <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#1a1200] shadow-2xl overflow-hidden">
+                                {TRADE_TYPES.map(t => (
+                                  <button key={t.id} onClick={() => { setRecAltType(t.id); setShowRecTypePicker(false); }}
+                                    className="w-full px-3 py-2 text-xs font-bold text-left transition hover:bg-white/5 flex items-center justify-between"
+                                    style={recAltType === t.id ? { color: '#f59e0b' } : { color: 'rgba(255,255,255,0.5)' }}>
+                                    {t.label} {recAltType === t.id && <Check size={10} />}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-[9px] text-white/30 leading-snug">
+                          {TRADE_TYPES.find(t => t.id === selectedTradeType)?.label} → <strong className="text-amber-300">{TRADE_TYPES.find(t => t.id === recAltType)?.label}</strong> after {recLossThreshold} losses
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Prediction picker */}
+                  {selectedSignal && selectedSignal.entryDigits && selectedSignal.entryDigits.length > 0
+                    && (selectedSignal.type === 'over_under' || selectedSignal.type === 'pro_over_under' || selectedSignal.type === 'under_7' || selectedSignal.type === 'over_2')
+                    && (() => {
+                      const digits = selectedSignal.entryDigits!;
+                      const dir = (selectedSignal.tradeDirection ?? '').toUpperCase();
+                      const lbl = dir.startsWith('OVER') ? 'OVER' : dir.startsWith('UNDER') ? 'UNDER' : dir;
+                      return (
+                        <div className="rounded-xl border p-3" style={{ borderColor: 'rgba(214,26,140,0.35)', background: 'rgba(214,26,140,0.06)' }}>
+                          <div className="flex items-center gap-1.5 mb-2">
+                            <TrendingUp size={11} className="text-[#D61A8C]" />
+                            <span className="text-[10px] font-black text-white/80 uppercase tracking-wide">Set Prediction</span>
+                            <span className="text-[9px] text-white/40 ml-auto">
+                              {predictionChoice !== null ? `Digit ${predictionChoice}` : `Auto: ${selectedSignal.targetDigit ?? digits[0]}`}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-2">
+                            {digits.map((d) => (
+                              <button key={d} onClick={() => setPredictionChoice(predictionChoice === d ? null : d)}
+                                className="rounded-lg py-2 text-center font-black transition active:scale-95"
+                                style={{
+                                  background: predictionChoice === d ? 'linear-gradient(135deg,#E67E22,#D61A8C)' : selectedSignal.targetDigit === d && predictionChoice === null ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.05)',
+                                  color: predictionChoice === d ? '#fff' : selectedSignal.targetDigit === d && predictionChoice === null ? '#10b981' : 'rgba(255,255,255,0.6)',
+                                  border: predictionChoice === d ? '1px solid #D61A8C' : selectedSignal.targetDigit === d && predictionChoice === null ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                                }}>
+                                <span className="block text-[10px] leading-none font-bold">{lbl}</span>
+                                <span className="block text-base mt-0.5">{d}</span>
+                                {selectedSignal.targetDigit === d && predictionChoice === null && (
+                                  <span className="block text-[8px] text-green-400 mt-0.5">AI</span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                  {/* Signal list */}
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-0.5">
+                    {combinedSignals.length > 0
+                      ? combinedSignals.map((s, i) => (
+                          <button key={`${s.type}-${s.tradeDirection}-${i}`} onClick={() => setSelectedSignal(s)} className="w-full text-left">
+                            <UnifiedSignalCard signal={s} rank={i + 1} selected={selectedSignal === s} lastDigit={lastDigit} isTop={i === 0} marketLabel={selectedSymbol} />
+                          </button>
+                        ))
+                      : (
+                          <div className="rounded-2xl border p-6 text-center" style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)' }}>
+                            <AlertTriangle size={20} className="text-white/20 mx-auto mb-2" />
+                            <p className="text-sm font-bold text-white/50">No signals detected</p>
+                            <p className="text-[10px] text-white/30 mt-1">Collecting ticks...</p>
+                          </div>
+                        )}
+                  </div>
+
+                  {/* Bot action buttons */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <button onClick={resetScan} className="border rounded-xl text-white/60 text-xs font-black py-3 transition active:scale-95"
+                      style={{ borderColor: 'rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)' }}>
+                      New Scan
+                    </button>
+                    <button onClick={handleLoadBot} className="bg-green-500 hover:bg-green-600 text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1">
+                      <Download size={12} />
+                      Load Bot
+                    </button>
+                    <button onClick={handleLoadBot} className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1"
+                      style={{ background: 'linear-gradient(135deg, #E67E22, #8E44AD)' }}>
+                      <Play size={12} />
+                      Load & Run
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
-        </div>
+
+          {/* ── MARKET MONITOR TAB ── */}
+          {activeTab === 'monitor' && (
+            <div className="p-3 flex-1 flex flex-col min-h-0">
+              <MarketMonitor
+                embedded
+                onSelectSymbol={(symId) => {
+                  setSelectedSymbol(symId);
+                  setActiveTab('scanner');
+                }}
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
 
   return (
     <>
-      {orbEl}
+      {step === 'orb' && orbEl}
       {panel}
     </>
   );
@@ -962,20 +1119,17 @@ function generateBotXML(opts: {
   stopLoss: string;
   martingale: string;
   symbol: string;
+  tradeTypeLabel: string;
   bestSignal: Signal | null;
   entryDigit?: number;
 }): string {
-  const { stake, takeProfit, stopLoss, martingale, symbol, bestSignal, entryDigit } = opts;
+  const { stake, takeProfit, stopLoss, martingale, symbol, tradeTypeLabel, bestSignal, entryDigit } = opts;
 
   let tradeTypeCat = 'digits';
   let tradeType = 'overunder';
-  let predictionNum = 7;
+  let predictionNum = 7;  // unused but kept for fallback
   let underDigitNum = 7;
   let overDigitNum = 2;
-  let entryUnderOp = 'GTE';
-  let entryUnderThreshold = 6;
-  let entryOverOp = 'LTE';
-  let entryOverThreshold = 3;
   let singleMode = false;
   let singlePurchaseType = 'DIGITUNDER';
   let singleEntryOp = 'GTE';
@@ -995,37 +1149,41 @@ function generateBotXML(opts: {
     if (underMatch) {
       const underDigit = parseInt(underMatch[1], 10);
       tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = underDigit; underDigitNum = underDigit;
-      entryUnderOp = 'GTE'; entryUnderThreshold = Math.max(0, underDigit - 1);
-      // Complementary over digit
-      overDigitNum = Math.min(9, underDigit <= 4 ? 2 : underDigit - 2);
-      entryOverOp = 'LTE'; entryOverThreshold = Math.min(9, overDigitNum + 1);
+      // Single mode: fixed UNDER prediction from analysis — no alternating
+      singleMode = true; singlePurchaseType = 'DIGITUNDER';
+      singlePrediction = underDigit;
+      // Entry: wait for a digit >= underDigit (at or above the barrier) to trigger entry
+      singleEntryOp = 'GTE'; singleEntryThreshold = underDigit;
     } else if (overMatch) {
       const overDigit = parseInt(overMatch[1], 10);
       tradeTypeCat = 'digits'; tradeType = 'overunder';
-      predictionNum = overDigit; overDigitNum = overDigit;
-      entryOverOp = 'LTE'; entryOverThreshold = Math.min(9, overDigit + 1);
-      // Complementary under digit
-      underDigitNum = Math.max(0, overDigit >= 5 ? 7 : overDigit + 2);
-      entryUnderOp = 'GTE'; entryUnderThreshold = Math.max(0, underDigitNum - 1);
+      // Single mode: fixed OVER prediction from analysis — no alternating
+      singleMode = true; singlePurchaseType = 'DIGITOVER';
+      singlePrediction = overDigit;
+      // Entry: wait for a digit <= overDigit (at or below the barrier) to trigger entry
+      singleEntryOp = 'LTE'; singleEntryThreshold = overDigit;
     } else if (dir === 'EVEN') {
       tradeTypeCat = 'digits'; tradeType = 'evenodd';
       singleMode = true; singlePurchaseType = 'DIGITEVEN';
+      // Entry: last digit must be ODD (1,3,5,7,9) → remainder when divided by 2 equals 1
       singlePrediction = 0; singleEntryOp = 'EQ'; singleEntryThreshold = 1;
     } else if (dir === 'ODD') {
       tradeTypeCat = 'digits'; tradeType = 'evenodd';
       singleMode = true; singlePurchaseType = 'DIGITODD';
+      // Entry: last digit must be EVEN (0,2,4,6,8) → remainder when divided by 2 equals 0
       singlePrediction = 0; singleEntryOp = 'EQ'; singleEntryThreshold = 0;
     } else if (matchesMatch) {
       const matchDigit = parseInt(matchesMatch[1], 10);
-      tradeTypeCat = 'digits'; tradeType = 'digits';
+      tradeTypeCat = 'digits'; tradeType = 'matchesdiffers';
       singleMode = true; singlePurchaseType = 'DIGITMATCH';
+      // Entry: wait for the match digit to appear (confirming it's active/trending)
       singlePrediction = matchDigit; singleEntryOp = 'EQ'; singleEntryThreshold = matchDigit;
     } else if (differsMatch) {
       const differDigit = parseInt(differsMatch[1], 10);
-      tradeTypeCat = 'digits'; tradeType = 'digits';
+      tradeTypeCat = 'digits'; tradeType = 'matchesdiffers';
       singleMode = true; singlePurchaseType = 'DIGITDIFF';
-      singlePrediction = differDigit; singleEntryOp = 'EQ'; singleEntryThreshold = differDigit;
+      // Entry: wait for a dominant digit (NOT the differ digit) to appear — that's the signal to buy differs
+      singlePrediction = differDigit; singleEntryOp = 'NEQ'; singleEntryThreshold = differDigit;
     } else if (dir === 'RISE') {
       tradeTypeCat = 'callput'; tradeType = 'risefall';
       singleMode = true; singlePurchaseType = 'CALL';
@@ -1036,16 +1194,12 @@ function generateBotXML(opts: {
       singlePrediction = 0; singleEntryOp = 'LTE'; singleEntryThreshold = 4;
     }
 
-    // User-selected entry digit overrides the derived prediction/barrier for Over/Under/MATCHES/DIFFERS
+    // User-selected entry digit overrides the derived prediction/barrier
     if (entryDigit !== undefined) {
-      if (overMatch) {
-        predictionNum = entryDigit;
-        overDigitNum = entryDigit;
-        entryOverThreshold = Math.min(9, entryDigit + 1);
-      } else if (underMatch) {
-        predictionNum = entryDigit;
-        underDigitNum = entryDigit;
-        entryUnderThreshold = Math.max(0, entryDigit - 1);
+      if (overMatch || underMatch) {
+        singlePrediction = entryDigit;
+        if (overMatch) { singleEntryOp = 'LTE'; singleEntryThreshold = entryDigit; }
+        else { singleEntryOp = 'GTE'; singleEntryThreshold = entryDigit; }
       } else if (matchesMatch || differsMatch) {
         singlePrediction = entryDigit;
         singleEntryThreshold = entryDigit;
@@ -1057,8 +1211,45 @@ function generateBotXML(opts: {
   const hasPrediction = singleMode ? !noPredictionTypes.includes(singlePurchaseType) : true;
   const predVal = singleMode ? singlePrediction : predictionNum;
 
+  // Even/Odd: entry check is parity (last_digit % 2 == expectedRemainder)
+  // EVEN trade → wait for ODD last digit (remainder 1), ODD trade → wait for EVEN last digit (remainder 0)
+  const isEvenOddParity = singlePurchaseType === 'DIGITEVEN' || singlePurchaseType === 'DIGITODD';
+  const parityRemainder = singlePurchaseType === 'DIGITEVEN' ? 1 : 0; // EVEN waits for odd entry digit
+
   const beforePurchaseStack = singleMode
-    ? `
+    ? isEvenOddParity
+      ? `
+      <block type="controls_if" id="bp_if1">
+        <value name="IF0">
+          <block type="logic_compare" id="bp_cmp1">
+            <field name="OP">EQ</field>
+            <value name="A">
+              <block type="math_arithmetic" id="bp_mod_arith">
+                <field name="OP">MODULO</field>
+                <value name="A">
+                  <shadow type="math_number" id="bp_mod_a_sh"><field name="NUM">0</field></shadow>
+                  <block type="last_digit" id="bp_ld1"></block>
+                </value>
+                <value name="B">
+                  <shadow type="math_number" id="bp_mod_b_sh"><field name="NUM">2</field></shadow>
+                  <block type="math_number" id="bp_mod_b"><field name="NUM">2</field></block>
+                </value>
+              </block>
+            </value>
+            <value name="B">
+              <block type="math_number" id="bp_mn1">
+                <field name="NUM">${parityRemainder}</field>
+              </block>
+            </value>
+          </block>
+        </value>
+        <statement name="DO0">
+          <block type="purchase" id="bp_pur1">
+            <field name="PURCHASE_LIST">${singlePurchaseType}</field>
+          </block>
+        </statement>
+      </block>`
+      : `
       <block type="controls_if" id="bp_if1">
         <value name="IF0">
           <block type="logic_compare" id="bp_cmp1">
@@ -1080,85 +1271,25 @@ function generateBotXML(opts: {
         </statement>
       </block>`
     : `
-      <block type="controls_if" id="bp_if_under">
+      <block type="controls_if" id="bp_if1">
         <value name="IF0">
-          <block type="logic_compare" id="bp_cmp_under">
-            <field name="OP">EQ</field>
+          <block type="logic_compare" id="bp_cmp1">
+            <field name="OP">GTE</field>
             <value name="A">
-              <block type="variables_get" id="bp_vg_pred">
-                <field name="VAR" id="v_pred">Prediction</field>
-              </block>
+              <block type="last_digit" id="bp_ld1"></block>
             </value>
             <value name="B">
-              <block type="variables_get" id="bp_vg_under">
-                <field name="VAR" id="v_under_digit">Under Digit</field>
+              <block type="math_number" id="bp_mn1">
+                <field name="NUM">0</field>
               </block>
             </value>
           </block>
         </value>
         <statement name="DO0">
-          <block type="controls_if" id="bp_entry_under">
-            <value name="IF0">
-              <block type="logic_compare" id="bp_entry_cmp_u">
-                <field name="OP">${entryUnderOp}</field>
-                <value name="A">
-                  <block type="last_digit" id="bp_ld_under"></block>
-                </value>
-                <value name="B">
-                  <block type="math_number" id="bp_entry_u_num">
-                    <field name="NUM">${entryUnderThreshold}</field>
-                  </block>
-                </value>
-              </block>
-            </value>
-            <statement name="DO0">
-              <block type="purchase" id="bp_buy_under">
-                <field name="PURCHASE_LIST">DIGITUNDER</field>
-              </block>
-            </statement>
+          <block type="purchase" id="bp_pur1">
+            <field name="PURCHASE_LIST">DIGITOVER</field>
           </block>
         </statement>
-        <next>
-          <block type="controls_if" id="bp_if_over">
-            <value name="IF0">
-              <block type="logic_compare" id="bp_cmp_over">
-                <field name="OP">EQ</field>
-                <value name="A">
-                  <block type="variables_get" id="bp_vg_pred2">
-                    <field name="VAR" id="v_pred">Prediction</field>
-                  </block>
-                </value>
-                <value name="B">
-                  <block type="variables_get" id="bp_vg_over">
-                    <field name="VAR" id="v_over_digit">Over Digit</field>
-                  </block>
-                </value>
-              </block>
-            </value>
-            <statement name="DO0">
-              <block type="controls_if" id="bp_entry_over">
-                <value name="IF0">
-                  <block type="logic_compare" id="bp_entry_cmp_o">
-                    <field name="OP">${entryOverOp}</field>
-                    <value name="A">
-                      <block type="last_digit" id="bp_ld_over"></block>
-                    </value>
-                    <value name="B">
-                      <block type="math_number" id="bp_entry_o_num">
-                        <field name="NUM">${entryOverThreshold}</field>
-                      </block>
-                    </value>
-                  </block>
-                </value>
-                <statement name="DO0">
-                  <block type="purchase" id="bp_buy_over">
-                    <field name="PURCHASE_LIST">DIGITOVER</field>
-                  </block>
-                </statement>
-              </block>
-            </statement>
-          </block>
-        </next>
       </block>`;
 
   const afterPurchaseWinLoss = singleMode
@@ -1258,47 +1389,7 @@ function generateBotXML(opts: {
                           </block>
                         </value>
                         <next>
-                          <block type="controls_if" id="ap_win_switch_if">
-                            <mutation xmlns="http://www.w3.org/1999/xhtml" else="1"></mutation>
-                            <value name="IF0">
-                              <block type="logic_compare" id="ap_win_switch_cmp">
-                                <field name="OP">EQ</field>
-                                <value name="A">
-                                  <block type="variables_get" id="ap_win_pred_get">
-                                    <field name="VAR" id="v_pred">Prediction</field>
-                                  </block>
-                                </value>
-                                <value name="B">
-                                  <block type="variables_get" id="ap_win_under_get">
-                                    <field name="VAR" id="v_under_digit">Under Digit</field>
-                                  </block>
-                                </value>
-                              </block>
-                            </value>
-                            <statement name="DO0">
-                              <block type="variables_set" id="ap_win_set_over">
-                                <field name="VAR" id="v_pred">Prediction</field>
-                                <value name="VALUE">
-                                  <block type="variables_get" id="ap_win_over_get">
-                                    <field name="VAR" id="v_over_digit">Over Digit</field>
-                                  </block>
-                                </value>
-                              </block>
-                            </statement>
-                            <statement name="ELSE">
-                              <block type="variables_set" id="ap_win_set_under">
-                                <field name="VAR" id="v_pred">Prediction</field>
-                                <value name="VALUE">
-                                  <block type="variables_get" id="ap_win_under_get2">
-                                    <field name="VAR" id="v_under_digit">Under Digit</field>
-                                  </block>
-                                </value>
-                              </block>
-                            </statement>
-                            <next>
-                              <block type="trade_again" id="ap_win_ta"></block>
-                            </next>
-                          </block>
+                          <block type="trade_again" id="ap_win_ta"></block>
                         </next>
                       </block>
                     </next>
@@ -1417,7 +1508,7 @@ function generateBotXML(opts: {
             <field name="TRADETYPE_LIST">${tradeType}</field>
             <next>
               <block type="trade_definition_contracttype" id="tdct1" deletable="false" movable="false">
-                <field name="TYPE_LIST">both</field>
+                <field name="TYPE_LIST">${singlePurchaseType === 'DIGITMATCH' ? 'DIGITMATCH' : singlePurchaseType === 'DIGITDIFF' ? 'DIGITDIFF' : 'both'}</field>
                 <next>
                   <block type="trade_definition_candleinterval" id="tdci1" deletable="false" movable="false">
                     <field name="CANDLEINTERVAL_LIST">60</field>
@@ -1550,7 +1641,7 @@ function generateBotXML(opts: {
           <block type="text_print" id="ap_tp_msg">
             <value name="TEXT">
               <shadow type="text" id="ap_tp_shadow">
-                <field name="TEXT">AutoAI: Take Profit Hit!</field>
+                <field name="TEXT">AutoAI ${tradeTypeLabel}: Take Profit Hit!</field>
               </shadow>
             </value>
           </block>
@@ -1575,7 +1666,7 @@ function generateBotXML(opts: {
           <block type="text_print" id="ap_sl_msg">
             <value name="TEXT">
               <shadow type="text" id="ap_sl_shadow">
-                <field name="TEXT">AutoAI: Stop Loss Reached.</field>
+                <field name="TEXT">AutoAI ${tradeTypeLabel}: Stop Loss Reached.</field>
               </shadow>
             </value>
           </block>
