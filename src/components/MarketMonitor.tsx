@@ -39,7 +39,6 @@ function useSharedMarketWS(symbols: string[]) {
   const mountedRef  = useRef(true);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const symbolsRef  = useRef<string[]>(symbols);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [markets, setMarkets] = useState<Map<string, MarketState>>(() => {
@@ -445,6 +444,7 @@ export default function MarketMonitor({
   const [selectedStrategies, setSelectedStrategies] = useState<StrategyId[]>(['even_odd', 'over_under']);
   const [selectedSymbols, setSelectedSymbols]       = useState<string[]>(DIGIT_SYMBOLS.slice(0, 8).map(s => s.id));
   const [showSymbolPicker, setShowSymbolPicker]     = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { isConnected, markets } = useSharedMarketWS(selectedSymbols);
 
