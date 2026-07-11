@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { X, Wifi, WifiOff, ChevronDown, ChevronUp, Activity, LayoutGrid } from 'lucide-react';
+import { X, Wifi, WifiOff, ChevronDown, ChevronUp, Activity, LayoutGrid, Upload } from 'lucide-react';
 import { SYMBOLS } from '../lib/symbols';
 import { analyzeMultiWindow, MultiWindowAnalysis } from '../lib/analysis';
 import { generateCombinedRankedSignals, SignalType } from '../lib/signals';
@@ -39,6 +39,7 @@ function useSharedMarketWS(symbols: string[]) {
   const mountedRef  = useRef(true);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const symbolsRef  = useRef<string[]>(symbols);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
   const [markets, setMarkets] = useState<Map<string, MarketState>>(() => {
@@ -576,6 +577,29 @@ export default function MarketMonitor({
           </div>
         </div>
         <div className="flex-1" />
+        <input ref={fileInputRef} type="file" accept=".xml,application/xml" className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const text = String(ev.target?.result ?? '');
+              try {
+                new DOMParser().parseFromString(text, 'application/xml');
+                alert(`XML loaded: ${file.name}`);
+              } catch {
+                alert('Invalid XML file');
+              }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+          }}
+        />
+        <button onClick={() => fileInputRef.current?.click()}
+          className="text-[9px] font-black px-2.5 py-1.5 rounded-xl border transition hover:bg-white/8 text-white/60 flex items-center gap-1"
+          style={{ borderColor: 'rgba(255,255,255,0.12)' }}>
+          <Upload size={10} /> Load XML
+        </button>
         <button onClick={() => setShowSymbolPicker(v => !v)}
           className="text-[9px] font-black px-2.5 py-1.5 rounded-xl border transition hover:bg-white/8 text-white/60"
           style={{ borderColor: 'rgba(255,255,255,0.12)', background: showSymbolPicker ? 'rgba(255,255,255,0.07)' : 'transparent' }}>

@@ -628,8 +628,8 @@ export default function Scanner() {
           <div className="relative z-10 flex flex-col items-center leading-none">
             {step === 'orb' ? (
               <>
-                <Orbit size={20} className="text-white/95" style={{ filter: 'drop-shadow(0 0 4px rgba(56,189,248,0.9))' }} />
-                <span className="text-[7px] font-black text-white mt-0.5 tracking-widest">SCAN</span>
+                <img src="/favicon_2.png" alt="logo" className="w-5 h-5 rounded-sm" />
+                <span className="text-[6px] font-black text-white mt-0.5 tracking-widest">PROFITHUB AI</span>
               </>
             ) : step === 'scanning' ? (
               <div className="flex items-end gap-[2px] h-4">
@@ -680,8 +680,9 @@ export default function Scanner() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <GripVertical size={14} className="text-white/30" />
-            <span className="bg-white/20 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold text-white/90">
-              aut<span className="text-[#E67E22]">ai</span>
+            <img src="/favicon_2.png" alt="logo" className="w-5 h-5 rounded-sm" />
+            <span className="text-[10px] font-black tracking-wide text-white/90">
+              ProfitHub <span className="text-[#E67E22]">AI</span>
             </span>
           </div>
           <span className="text-[10px] text-white/40">{isConnected ? 'Connected' : 'Connecting...'}</span>
