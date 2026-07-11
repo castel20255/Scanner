@@ -632,8 +632,7 @@ export default function Scanner() {
           <div className="relative z-10 flex flex-col items-center leading-none">
             {step === 'orb' ? (
               <>
-                <img src="/favicon_2.png" alt="logo" className="w-5 h-5 rounded-sm" />
-                <span className="text-[6px] font-black text-white mt-0.5 tracking-widest">PRO AI</span>
+                <span className="text-[7px] font-black text-white tracking-widest">PRO AI</span>
               </>
             ) : step === 'scanning' ? (
               <div className="flex items-end gap-[2px] h-4">
@@ -684,7 +683,6 @@ export default function Scanner() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <GripVertical size={14} className="text-white/30" />
-            <img src="/favicon_2.png" alt="logo" className="w-5 h-5 rounded-sm" />
             <span className="text-[10px] font-black tracking-wide text-white/90">
               Pro <span className="text-[#E67E22]">AI</span>
             </span>
