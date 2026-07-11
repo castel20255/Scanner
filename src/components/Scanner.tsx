@@ -1024,21 +1024,8 @@ function generateBotXML(opts: {
           </block>
         </value>
         <statement name="DO0">
-          <block type="text_print" id="bp_log_single">
-            <value name="TEXT">
-              <shadow type="text" id="bp_log_single_shadow"><field name="TEXT">digit</field></shadow>
-              <block type="text_join" id="bp_log_single_join">
-                <mutation items="3"></mutation>
-                <value name="ADD0"><block type="text" id="bp_log_single_p0"><field name="TEXT">Last digit: </field></block></value>
-                <value name="ADD1"><block type="last_digit" id="bp_log_single_ld"></block></value>
-                <value name="ADD2"><block type="text" id="bp_log_single_p2"><field name="TEXT"> → BUY ${singlePurchaseType} ${entryDigit ?? predVal}</field></block></value>
-              </block>
-            </value>
-            <next>
-              <block type="purchase" id="bp_pur1">
-                <field name="PURCHASE_LIST">${singlePurchaseType}</field>
-              </block>
-            </next>
+          <block type="purchase" id="bp_pur1">
+            <field name="PURCHASE_LIST">${singlePurchaseType}</field>
           </block>
         </statement>
       </block>`
@@ -1075,21 +1062,8 @@ function generateBotXML(opts: {
               </block>
             </value>
             <statement name="DO0">
-              <block type="text_print" id="bp_log_under">
-                <value name="TEXT">
-                  <shadow type="text" id="bp_log_under_shadow"><field name="TEXT">digit</field></shadow>
-                  <block type="text_join" id="bp_log_under_join">
-                    <mutation items="3"></mutation>
-                    <value name="ADD0"><block type="text" id="bp_log_under_p0"><field name="TEXT">Last digit: </field></block></value>
-                    <value name="ADD1"><block type="last_digit" id="bp_log_under_ld"></block></value>
-                    <value name="ADD2"><block type="text" id="bp_log_under_p2"><field name="TEXT"> → BUY DIGITUNDER ${entryUnderThreshold}</field></block></value>
-                  </block>
-                </value>
-                <next>
-                  <block type="purchase" id="bp_buy_under">
-                    <field name="PURCHASE_LIST">DIGITUNDER</field>
-                  </block>
-                </next>
+              <block type="purchase" id="bp_buy_under">
+                <field name="PURCHASE_LIST">DIGITUNDER</field>
               </block>
             </statement>
           </block>
@@ -1127,21 +1101,8 @@ function generateBotXML(opts: {
                   </block>
                 </value>
                 <statement name="DO0">
-                  <block type="text_print" id="bp_log_over">
-                    <value name="TEXT">
-                      <shadow type="text" id="bp_log_over_shadow"><field name="TEXT">digit</field></shadow>
-                      <block type="text_join" id="bp_log_over_join">
-                        <mutation items="3"></mutation>
-                        <value name="ADD0"><block type="text" id="bp_log_over_p0"><field name="TEXT">Last digit: </field></block></value>
-                        <value name="ADD1"><block type="last_digit" id="bp_log_over_ld"></block></value>
-                        <value name="ADD2"><block type="text" id="bp_log_over_p2"><field name="TEXT"> → BUY DIGITOVER ${entryOverThreshold}</field></block></value>
-                      </block>
-                    </value>
-                    <next>
-                      <block type="purchase" id="bp_buy_over">
-                        <field name="PURCHASE_LIST">DIGITOVER</field>
-                      </block>
-                    </next>
+                  <block type="purchase" id="bp_buy_over">
+                    <field name="PURCHASE_LIST">DIGITOVER</field>
                   </block>
                 </statement>
               </block>
@@ -1476,35 +1437,7 @@ function generateBotXML(opts: {
                               <block type="math_number" id="mn_lc">
                                 <field name="NUM">0</field>
                               </block>
-                            </value>
-                            <next>
-                              <block type="text_print" id="init_log1">
-                                <value name="TEXT">
-                                  <shadow type="text" id="init_log1_shadow"><field name="TEXT">Bot started</field></shadow>
-                                  <block type="text_join" id="init_log1_join">
-                                    <mutation items="4"></mutation>
-                                    <value name="ADD0"><block type="text" id="init_log1_p0"><field name="TEXT">AutoAI Bot — Strategy: </field></block></value>
-                                    <value name="ADD1"><block type="text" id="init_log1_p1"><field name="TEXT">${tradeTypeCat}/${tradeType} ${singleMode ? singlePurchaseType : ''} ${bestSignal?.tradeDirection ?? ''}</field></block></value>
-                                    <value name="ADD2"><block type="text" id="init_log1_p2"><field name="TEXT"> | Entry digit: ${entryDigit ?? predVal}</field></block></value>
-                                    <value name="ADD3"><block type="text" id="init_log1_p3"><field name="TEXT"> | Take Profit: </field></block></value>
-                                  </block>
-                                </value>
-                                <next>
-                                  <block type="text_print" id="init_log2">
-                                    <value name="TEXT">
-                                      <shadow type="text" id="init_log2_shadow"><field name="TEXT">limits</field></shadow>
-                                      <block type="text_join" id="init_log2_join">
-                                        <mutation items="4"></mutation>
-                                        <value name="ADD0"><block type="text" id="init_log2_p0"><field name="TEXT">Stake </field></block></value>
-                                        <value name="ADD1"><block type="variables_get" id="init_log2_stake"><field name="VAR" id="v_stake">Stake</field></block></value>
-                                        <value name="ADD2"><block type="text" id="init_log2_p2"><field name="TEXT"> | TP </field></block></value>
-                                        <value name="ADD3"><block type="variables_get" id="init_log2_tp"><field name="VAR" id="v_tp">Take Profit</field></block></value>
-                                      </block>
-                                    </value>${extraInit}
-                                  </block>
-                                </next>
-                              </block>
-                            </next>
+                            </value>${extraInit}
                           </block>
                         </next>
                       </block>
