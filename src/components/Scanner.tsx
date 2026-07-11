@@ -425,6 +425,7 @@ export default function Scanner() {
   const [showRecTypePicker, setShowRecTypePicker] = useState(false);
   const recTypePickerRef = useRef<HTMLDivElement>(null);
   const tradeTypePickerRef = useRef<HTMLDivElement>(null);
+  const symbolPickerRef = useRef<HTMLDivElement>(null);
   const prevSignalKeyRef = useRef<string>('');
   const shiftTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -532,6 +533,18 @@ export default function Scanner() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showTradeTypePicker]);
+
+  // Close symbol dropdown on outside click
+  useEffect(() => {
+    if (!showSymbolPicker) return;
+    const handler = (e: MouseEvent) => {
+      if (symbolPickerRef.current && !symbolPickerRef.current.contains(e.target as Node)) {
+        setShowSymbolPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSymbolPicker]);
 
   // Auto-advance from orb → config once connected & ticks flow in
   useEffect(() => {
@@ -658,7 +671,7 @@ export default function Scanner() {
   const panel = step !== 'orb' && (
     <div
       ref={panelRef}
-      className="fixed z-[55] rounded-3xl overflow-hidden"
+      className="fixed z-[55] rounded-3xl"
       style={{
         top: '50%',
         left: '50%',
@@ -731,7 +744,7 @@ export default function Scanner() {
               {/* Symbol selector */}
               <div>
                 <label className="text-[10px] font-bold text-white/50 uppercase tracking-wider block mb-1">Market</label>
-                <div className="relative">
+                <div className="relative" ref={symbolPickerRef}>
                   <button
                     onClick={() => setShowSymbolPicker((v) => !v)}
                     className="w-full flex items-center justify-between border rounded-xl px-4 py-2.5 transition"
@@ -741,7 +754,7 @@ export default function Scanner() {
                     <ChevronDown size={14} className={`text-white/40 transition-transform ${showSymbolPicker ? 'rotate-180' : ''}`} />
                   </button>
                   {showSymbolPicker && (
-                    <div className="absolute z-20 top-full left-0 right-0 mt-1 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto"
+                    <div className="absolute z-[60] top-full left-0 right-0 mt-1 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto"
                       style={{ background: 'rgba(15,10,30,0.98)', border: '1px solid rgba(255,255,255,0.12)', backdropFilter: 'blur(20px)' }}>
                       {['Volatility', 'Crash/Boom', 'Jump', 'Bear/Bull', 'Range', 'Step'].map((cat) => (
                         <div key={cat}>
