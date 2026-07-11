@@ -413,6 +413,11 @@ export default function Scanner() {
     setCombinedSignals(generateCombinedRankedSignals(result, allowedTypes));
   }, [subscriptionState?.ticks.length, allowedTypes]);
 
+  const runScanOnce = useCallback(() => {
+    if (!isConnected) return;
+    startScan();
+  }, [isConnected, startScan]);
+
   // Continuous automatic scanner — runs every 60 seconds when enabled
   useEffect(() => {
     if (!autoScan) return;
@@ -485,11 +490,6 @@ export default function Scanner() {
     if (step === 'orb') { setStep('config'); }
     else { setStep('orb'); setMinimized(false); }
   }, [orb.isDragging, step]);
-
-  const runScanOnce = useCallback(() => {
-    if (!isConnected) return;
-    startScan();
-  }, [isConnected, startScan]);
 
   // Close panel when clicking outside
   useEffect(() => {
