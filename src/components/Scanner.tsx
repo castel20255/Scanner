@@ -556,19 +556,23 @@ export default function Scanner() {
     const signalToUse = selectedSignal || combinedSignals[0] || null;
     const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
     const tradeTypeLabel = TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? selectedTradeType;
+    const recovery = recMode
+      ? { lossThreshold: parseInt(recLossThreshold, 10) || 3, altTradeTypeId: recAltType }
+      : undefined;
     const xml = generateBotXML({
       stake, takeProfit, stopLoss, martingale,
       symbol: selectedSymbol, tradeTypeLabel, bestSignal: signalToUse, entryDigit,
+      recovery,
     });
     const blob = new Blob([xml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     const tradeLabel = TRADE_TYPES.find(t => t.id === selectedTradeType)?.label?.replace(/[\s/]/g, '_') ?? selectedTradeType;
-    a.download = `autoai_${tradeLabel}_${selectedSymbol}.xml`;
+    a.download = `proai_${tradeLabel}_${selectedSymbol}.xml`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals, predictionChoice]);
+  }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals, predictionChoice, recMode, recLossThreshold, recAltType]);
 
   const selectedSymbolInfo = SYMBOLS.find((s) => s.id === selectedSymbol);
   const lastDigit = mwa?.lastDigit ?? null;
@@ -629,7 +633,7 @@ export default function Scanner() {
             {step === 'orb' ? (
               <>
                 <img src="/favicon_2.png" alt="logo" className="w-5 h-5 rounded-sm" />
-                <span className="text-[6px] font-black text-white mt-0.5 tracking-widest">PROFITHUB AI</span>
+                <span className="text-[6px] font-black text-white mt-0.5 tracking-widest">PRO AI</span>
               </>
             ) : step === 'scanning' ? (
               <div className="flex items-end gap-[2px] h-4">
@@ -682,7 +686,7 @@ export default function Scanner() {
             <GripVertical size={14} className="text-white/30" />
             <img src="/favicon_2.png" alt="logo" className="w-5 h-5 rounded-sm" />
             <span className="text-[10px] font-black tracking-wide text-white/90">
-              ProfitHub <span className="text-[#E67E22]">AI</span>
+              Pro <span className="text-[#E67E22]">AI</span>
             </span>
           </div>
           <span className="text-[10px] text-white/40">{isConnected ? 'Connected' : 'Connecting...'}</span>
@@ -1005,6 +1009,26 @@ export default function Scanner() {
                             )}
                           </div>
                         </div>
+                        <button
+                          onClick={() => {
+                            const suggested = suggestAltTradeType(selectedTradeType, combinedSignals);
+                            setRecAltType(suggested);
+                          }}
+                          className="w-full rounded-lg px-2 py-1.5 text-[10px] font-black flex items-center justify-center gap-1.5 border transition active:scale-95"
+                          style={{ background: 'rgba(56,189,248,0.08)', borderColor: 'rgba(56,189,248,0.3)', color: '#38bdf8' }}>
+                          <Sparkles size={11} />
+                          Auto-Suggest Best Alt Strategy
+                        </button>
+                        {(() => {
+                          const suggested = suggestAltTradeType(selectedTradeType, combinedSignals);
+                          const suggestedLabel = TRADE_TYPES.find(t => t.id === suggested)?.label ?? suggested;
+                          if (suggested === recAltType) return null;
+                          return (
+                            <p className="text-[9px] text-sky-400/70 leading-snug">
+                              Based on current signals, <strong className="text-sky-300">{suggestedLabel}</strong> has the strongest alignment. Tap to apply.
+                            </p>
+                          );
+                        })()}
                         <p className="text-[9px] text-white/30 leading-snug">
                           {TRADE_TYPES.find(t => t.id === selectedTradeType)?.label} → <strong className="text-amber-300">{TRADE_TYPES.find(t => t.id === recAltType)?.label}</strong> after {recLossThreshold} losses
                         </p>
@@ -1114,6 +1138,55 @@ export default function Scanner() {
 
 // ─── XML Bot Generator ─────────────────────────────────────────────────────────
 
+function mapAltTradeType(tradeTypeId: string): {
+  purchaseType: string; entryOp: string; entryThreshold: number;
+  prediction: number; tradeTypeCat: string; tradeType: string; hasPrediction: boolean;
+} {
+  switch (tradeTypeId) {
+    case 'even_odd':
+      return { purchaseType: 'DIGITEVEN', entryOp: 'EQ', entryThreshold: 1, prediction: 0, tradeTypeCat: 'digits', tradeType: 'evenodd', hasPrediction: false };
+    case 'over_under':
+      return { purchaseType: 'DIGITOVER', entryOp: 'LTE', entryThreshold: 2, prediction: 2, tradeTypeCat: 'digits', tradeType: 'overunder', hasPrediction: true };
+    case 'matches':
+      return { purchaseType: 'DIGITMATCH', entryOp: 'EQ', entryThreshold: 5, prediction: 5, tradeTypeCat: 'digits', tradeType: 'matchesdiffers', hasPrediction: true };
+    case 'differs':
+      return { purchaseType: 'DIGITDIFF', entryOp: 'NEQ', entryThreshold: 5, prediction: 5, tradeTypeCat: 'digits', tradeType: 'matchesdiffers', hasPrediction: true };
+    case 'rise_fall':
+      return { purchaseType: 'CALL', entryOp: 'GTE', entryThreshold: 5, prediction: 0, tradeTypeCat: 'callput', tradeType: 'risefall', hasPrediction: false };
+    default:
+      return { purchaseType: 'DIGITEVEN', entryOp: 'EQ', entryThreshold: 1, prediction: 0, tradeTypeCat: 'digits', tradeType: 'evenodd', hasPrediction: false };
+  }
+}
+
+function suggestAltTradeType(currentTypeId: string, signals: Signal[]): string {
+  const hasStrong = (types: string[]) => signals.some(s =>
+    types.includes(s.type) && s.status === 'TRADE NOW' && s.probability >= 55
+  );
+  const suggestions: Record<string, string> = {
+    over_under: 'even_odd',
+    even_odd: 'over_under',
+    matches: 'differs',
+    differs: 'matches',
+    rise_fall: 'even_odd',
+    pro_over_under: 'pro_even_odd',
+    pro_even_odd: 'pro_over_under',
+  };
+  const suggested = suggestions[currentTypeId] ?? 'even_odd';
+  const altTradeTypeMap: Record<string, string[]> = {
+    even_odd: ['even_odd', 'pro_even_odd'],
+    over_under: ['over_under', 'pro_over_under', 'under_7', 'over_2'],
+    matches: ['matches'],
+    differs: ['differs'],
+    rise_fall: ['rise_fall'],
+  };
+  if (hasStrong(altTradeTypeMap[suggested] ?? ['even_odd'])) return suggested;
+  for (const alt of ['even_odd', 'over_under', 'matches', 'differs', 'rise_fall']) {
+    if (alt === currentTypeId) continue;
+    if (hasStrong(altTradeTypeMap[alt] ?? [])) return alt;
+  }
+  return suggested;
+}
+
 function generateBotXML(opts: {
   stake: string;
   takeProfit: string;
@@ -1123,8 +1196,9 @@ function generateBotXML(opts: {
   tradeTypeLabel: string;
   bestSignal: Signal | null;
   entryDigit?: number;
+  recovery?: { lossThreshold: number; altTradeTypeId: string };
 }): string {
-  const { stake, takeProfit, stopLoss, martingale, symbol, tradeTypeLabel, bestSignal, entryDigit } = opts;
+  const { stake, takeProfit, stopLoss, martingale, symbol, tradeTypeLabel, bestSignal, entryDigit, recovery } = opts;
 
   let tradeTypeCat = 'digits';
   let tradeType = 'overunder';
@@ -1217,9 +1291,59 @@ function generateBotXML(opts: {
   const isEvenOddParity = singlePurchaseType === 'DIGITEVEN' || singlePurchaseType === 'DIGITODD';
   const parityRemainder = singlePurchaseType === 'DIGITEVEN' ? 1 : 0; // EVEN waits for odd entry digit
 
-  const beforePurchaseStack = singleMode
-    ? isEvenOddParity
-      ? `
+  const altMap = recovery ? mapAltTradeType(recovery.altTradeTypeId) : null;
+
+  const altPurchaseXml = recovery && altMap ? `
+      <block type="controls_if" id="bp_rec_if">
+        <value name="IF0">
+          <block type="variables_get" id="bp_rec_get">
+            <field name="VAR" id="v_rec_mode">Recovery Mode</field>
+          </block>
+        </value>
+        <statement name="DO0">
+          <block type="purchase" id="bp_rec_pur">
+            <field name="PURCHASE_LIST">${altMap.purchaseType}</field>
+          </block>
+        </statement>
+        <statement name="ELSE">
+          <block type="controls_if" id="bp_if1">
+            <value name="IF0">
+              <block type="logic_compare" id="bp_cmp1">
+                <field name="OP">${isEvenOddParity ? 'EQ' : singleEntryOp}</field>
+                <value name="A">
+                  ${isEvenOddParity ? `<block type="math_arithmetic" id="bp_mod_arith">
+                    <field name="OP">MODULO</field>
+                    <value name="A">
+                      <shadow type="math_number" id="bp_mod_a_sh"><field name="NUM">0</field></shadow>
+                      <block type="last_digit" id="bp_ld1"></block>
+                    </value>
+                    <value name="B">
+                      <shadow type="math_number" id="bp_mod_b_sh"><field name="NUM">2</field></shadow>
+                      <block type="math_number" id="bp_mod_b"><field name="NUM">2</field></block>
+                    </value>
+                  </block>` : `<block type="last_digit" id="bp_ld1"></block>`}
+                </value>
+                <value name="B">
+                  <block type="math_number" id="bp_mn1">
+                    <field name="NUM">${isEvenOddParity ? parityRemainder : singleEntryThreshold}</field>
+                  </block>
+                </value>
+              </block>
+            </value>
+            <statement name="DO0">
+              <block type="purchase" id="bp_pur1">
+                <field name="PURCHASE_LIST">${singlePurchaseType}</field>
+              </block>
+            </statement>
+          </block>
+        </statement>
+      </block>` : '';
+
+  const beforePurchaseStack = recovery
+    ? altPurchaseXml
+    : singleMode
+      ? isEvenOddParity
+        ? `
       <block type="controls_if" id="bp_if1">
         <value name="IF0">
           <block type="logic_compare" id="bp_cmp1">
@@ -1250,7 +1374,7 @@ function generateBotXML(opts: {
           </block>
         </statement>
       </block>`
-      : `
+        : `
       <block type="controls_if" id="bp_if1">
         <value name="IF0">
           <block type="logic_compare" id="bp_cmp1">
@@ -1271,7 +1395,7 @@ function generateBotXML(opts: {
           </block>
         </statement>
       </block>`
-    : `
+      : `
       <block type="controls_if" id="bp_if1">
         <value name="IF0">
           <block type="logic_compare" id="bp_cmp1">
@@ -1292,6 +1416,55 @@ function generateBotXML(opts: {
           </block>
         </statement>
       </block>`;
+
+  const recLossThreshold = recovery?.lossThreshold ?? 3;
+
+  const winRecResetXml = recovery ? `
+                        <next>
+                          <block type="variables_set" id="ap_win_rec_rst">
+                            <field name="VAR" id="v_rec_mode">Recovery Mode</field>
+                            <value name="VALUE">
+                              <block type="logic_boolean" id="lb_win_rec">
+                                <field name="BOOL">FALSE</field>
+                              </block>
+                            </value>` : '';
+
+  const winRecCloseXml = recovery ? `
+                          </block>
+                        </next>` : '';
+
+  const lossRecCheckXml = recovery ? `
+                        <next>
+                          <block type="controls_if" id="ap_loss_rec_chk">
+                            <value name="IF0">
+                              <block type="logic_compare" id="ap_loss_rec_cmp">
+                                <field name="OP">GTE</field>
+                                <value name="A">
+                                  <block type="variables_get" id="ap_loss_lc_get">
+                                    <field name="VAR" id="v_loss_cnt">Loss Count</field>
+                                  </block>
+                                </value>
+                                <value name="B">
+                                  <block type="math_number" id="ap_loss_thresh">
+                                    <field name="NUM">${recLossThreshold}</field>
+                                  </block>
+                                </value>
+                              </block>
+                            </value>
+                            <statement name="DO0">
+                              <block type="variables_set" id="ap_loss_rec_set">
+                                <field name="VAR" id="v_rec_mode">Recovery Mode</field>
+                                <value name="VALUE">
+                                  <block type="logic_boolean" id="lb_loss_rec">
+                                    <field name="BOOL">TRUE</field>
+                                  </block>
+                                </value>
+                              </block>
+                            </statement>` : '';
+
+  const lossRecCloseXml = recovery ? `
+                          </block>
+                        </next>` : '';
 
   const afterPurchaseWinLoss = singleMode
     ? `
@@ -1317,11 +1490,11 @@ function generateBotXML(opts: {
                           <block type="math_number" id="ap_win_lc_zero">
                             <field name="NUM">0</field>
                           </block>
-                        </value>
+                        </value>${winRecResetXml}
                         <next>
                           <block type="trade_again" id="ap_win_ta"></block>
                         </next>
-                      </block>
+                      </block>${winRecCloseXml}
                     </next>
                   </block>
                 </statement>
@@ -1356,11 +1529,11 @@ function generateBotXML(opts: {
                           <shadow type="math_number" id="ap_lc_delta">
                             <field name="NUM">1</field>
                           </shadow>
-                        </value>
+                        </value>${lossRecCheckXml}
                         <next>
                           <block type="trade_again" id="ap_loss_ta"></block>
                         </next>
-                      </block>
+                      </block>${lossRecCloseXml}
                     </next>
                   </block>
                 </statement>
@@ -1388,11 +1561,11 @@ function generateBotXML(opts: {
                           <block type="math_number" id="ap_win_lc_zero">
                             <field name="NUM">0</field>
                           </block>
-                        </value>
+                        </value>${winRecResetXml}
                         <next>
                           <block type="trade_again" id="ap_win_ta"></block>
                         </next>
-                      </block>
+                      </block>${winRecCloseXml}
                     </next>
                   </block>
                 </statement>
@@ -1427,11 +1600,11 @@ function generateBotXML(opts: {
                           <shadow type="math_number" id="ap_lc_delta">
                             <field name="NUM">1</field>
                           </shadow>
-                        </value>
+                        </value>${lossRecCheckXml}
                         <next>
                           <block type="trade_again" id="ap_loss_ta"></block>
                         </next>
-                      </block>
+                      </block>${lossRecCloseXml}
                     </next>
                   </block>
                 </statement>
@@ -1444,8 +1617,30 @@ function generateBotXML(opts: {
     <variable id="v_under_digit">Under Digit</variable>
     <variable id="v_over_digit">Over Digit</variable>`;
 
+  const recoveryInitXml = recovery ? `
+                                <next>
+                                  <block type="variables_set" id="vs_rec_mode">
+                                    <field name="VAR" id="v_rec_mode">Recovery Mode</field>
+                                    <value name="VALUE">
+                                      <block type="logic_boolean" id="lb_rec_mode">
+                                        <field name="BOOL">FALSE</field>
+                                      </block>
+                                    </value>
+                                  </block>
+                                </next>` : '';
+
   const extraInit = singleMode
-    ? ''
+    ? recovery ? `
+                        <next>
+                          <block type="variables_set" id="vs_rec_mode">
+                            <field name="VAR" id="v_rec_mode">Recovery Mode</field>
+                            <value name="VALUE">
+                              <block type="logic_boolean" id="lb_rec_mode">
+                                <field name="BOOL">FALSE</field>
+                              </block>
+                            </value>
+                          </block>
+                        </next>` : ''
     : `
                         <next>
                           <block type="variables_set" id="vs_under">
@@ -1470,7 +1665,7 @@ function generateBotXML(opts: {
                                       <block type="variables_get" id="vg_under_init">
                                         <field name="VAR" id="v_under_digit">Under Digit</field>
                                       </block>
-                                    </value>
+                                    </value>${recoveryInitXml}
                                   </block>
                                 </next>
                               </block>
@@ -1494,7 +1689,8 @@ function generateBotXML(opts: {
     <variable id="v_tp">Take Profit</variable>
     <variable id="v_sl">Stop Loss</variable>
     <variable id="v_mg">Martingale</variable>
-    <variable id="v_loss_cnt">Loss Count</variable>${extraVars}
+    <variable id="v_loss_cnt">Loss Count</variable>
+    <variable id="v_rec_mode">Recovery Mode</variable>${extraVars}
   </variables>
 
   <block type="trade_definition" id="td_main" deletable="false" x="0" y="60">
@@ -1642,7 +1838,7 @@ function generateBotXML(opts: {
           <block type="text_print" id="ap_tp_msg">
             <value name="TEXT">
               <shadow type="text" id="ap_tp_shadow">
-                <field name="TEXT">AutoAI ${tradeTypeLabel}: Take Profit Hit!</field>
+                <field name="TEXT">Pro AI ${tradeTypeLabel}: Take Profit Hit!</field>
               </shadow>
             </value>
           </block>
@@ -1667,7 +1863,7 @@ function generateBotXML(opts: {
           <block type="text_print" id="ap_sl_msg">
             <value name="TEXT">
               <shadow type="text" id="ap_sl_shadow">
-                <field name="TEXT">AutoAI ${tradeTypeLabel}: Stop Loss Reached.</field>
+                <field name="TEXT">Pro AI ${tradeTypeLabel}: Stop Loss Reached.</field>
               </shadow>
             </value>
           </block>
