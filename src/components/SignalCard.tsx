@@ -1,24 +1,24 @@
 import { Signal, SignalStatus } from '../lib/signals';
 import { Zap, Clock, MinusCircle } from 'lucide-react';
 
-const statusConfig: Record<SignalStatus, { bg: string; text: string; border: string; icon: React.ReactNode }> = {
+const statusConfig: Record<SignalStatus, { color: string; bg: string; border: string; icon: React.ReactNode }> = {
   'TRADE NOW': {
-    bg: 'bg-green-50',
-    text: 'text-green-700',
-    border: 'border-green-200',
-    icon: <Zap size={12} className="text-green-600" />,
+    color: '#10b981',
+    bg: 'rgba(16,185,129,0.08)',
+    border: 'rgba(16,185,129,0.25)',
+    icon: <Zap size={10} className="text-green-400" />,
   },
   WAIT: {
-    bg: 'bg-amber-50',
-    text: 'text-amber-700',
-    border: 'border-amber-200',
-    icon: <Clock size={12} className="text-amber-600" />,
+    color: '#f59e0b',
+    bg: 'rgba(245,158,11,0.06)',
+    border: 'rgba(245,158,11,0.2)',
+    icon: <Clock size={10} className="text-amber-400" />,
   },
   NEUTRAL: {
-    bg: 'bg-gray-50',
-    text: 'text-gray-500',
-    border: 'border-gray-200',
-    icon: <MinusCircle size={12} className="text-gray-400" />,
+    color: '#6b7280',
+    bg: 'rgba(107,114,128,0.05)',
+    border: 'rgba(107,114,128,0.15)',
+    icon: <MinusCircle size={10} className="text-gray-400" />,
   },
 };
 
@@ -32,51 +32,39 @@ export function SignalCard({ signal, compact = false }: Props) {
   const barWidth = Math.min(signal.probability, 100);
 
   return (
-    <div className={`rounded-xl border ${cfg.border} ${cfg.bg} p-3 transition-all duration-300`}>
-      <div className="flex items-start justify-between gap-2 mb-2">
+    <div className="rounded-lg p-2.5 transition-all duration-300"
+      style={{ background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+      <div className="flex items-center gap-2">
+        {/* Status icon */}
+        <div className="shrink-0">{cfg.icon}</div>
+
+        {/* Label + direction */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-0.5">
-            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{signal.label}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black text-white/80 uppercase tracking-wider truncate">{signal.label}</span>
             {signal.tradeDirection && (
-              <span className="bg-white border border-gray-200 text-[10px] font-black px-1.5 py-0.5 rounded text-gray-700">
+              <span className="text-[8px] font-black px-1 py-0.5 rounded text-white/60"
+                style={{ background: 'rgba(255,255,255,0.08)' }}>
                 {signal.tradeDirection}
               </span>
             )}
           </div>
-          <p className="text-xs font-semibold text-gray-800 leading-snug">{signal.recommendation}</p>
+          {!compact && (
+            <p className="text-[9px] text-white/40 leading-tight mt-0.5 truncate">{signal.recommendation}</p>
+          )}
         </div>
-        <div className="flex flex-col items-end gap-1 shrink-0">
-          <span
-            className={`flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full border ${cfg.border} ${cfg.text} whitespace-nowrap`}
-          >
-            {cfg.icon}
-            {signal.status}
+
+        {/* Probability */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-12 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${barWidth}%`, background: cfg.color }} />
+          </div>
+          <span className="text-[11px] font-black tabular-nums" style={{ color: cfg.color }}>
+            {signal.probability.toFixed(0)}%
           </span>
-          <span className="text-sm font-black text-gray-800">{signal.probability.toFixed(0)}%</span>
         </div>
       </div>
-
-      {/* Probability bar */}
-      <div className="w-full bg-gray-200 h-1.5 rounded-full overflow-hidden mb-2">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{
-            width: `${barWidth}%`,
-            background:
-              signal.status === 'TRADE NOW'
-                ? 'linear-gradient(90deg, #10b981, #059669)'
-                : signal.status === 'WAIT'
-                ? 'linear-gradient(90deg, #f59e0b, #d97706)'
-                : '#9ca3af',
-          }}
-        />
-      </div>
-
-      {!compact && (
-        <p className="text-[10px] text-gray-400 leading-snug">
-          <span className="font-semibold text-gray-500">Entry:</span> {signal.entryCondition}
-        </p>
-      )}
     </div>
   );
 }

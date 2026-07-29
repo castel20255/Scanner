@@ -5,7 +5,6 @@ import {
   Zap,
   TrendingUp,
   TrendingDown,
-  Download,
   X,
   Check,
   AlertTriangle,
@@ -16,17 +15,21 @@ import {
   GripVertical,
   Sparkles,
   BarChart2,
-  KeyRound,
   Square,
   Activity,
   Wallet,
+  Upload,
+  Play,
+  Radar,
+  LineChart,
+  BookOpen,
 } from 'lucide-react';
 import MarketMonitor from './MarketMonitor';
 import TradeJournal from './TradeJournal';
-import ApiTokenModal from './ApiTokenModal';
 import { useDerivWS } from '../hooks/useDerivWS';
 import { useDerivTrade, TradeConfig } from '../hooks/useDerivTrade';
 import { useSharedMarketWS } from '../hooks/useSharedMarketWS';
+import { useIframeBridge, parseBotXML, BotConfig, IframeStatus } from '../hooks/useIframeBridge';
 import { analyzeMultiWindow, MultiWindowAnalysis } from '../lib/analysis';
 import { generateCombinedRankedSignals, Signal, SignalType } from '../lib/signals';
 import { SYMBOLS } from '../lib/symbols';
@@ -44,6 +47,18 @@ const TRADE_TYPES = [
   { id: 'pro_even_odd', label: 'Pro Even / Odd', types: ['pro_even_odd'] as SignalType[] },
   { id: 'all', label: 'All Strategies', types: ['over_under', 'even_odd', 'matches', 'differs', 'rise_fall', 'pro_over_under', 'pro_even_odd', 'under_7', 'over_2'] as SignalType[] },
 ];
+
+function suggestAltTradeType(currentTypeId: string, signals: Signal[]): string {
+  const otherTypes = TRADE_TYPES.filter(t => t.id !== currentTypeId && t.id !== 'all');
+  let best = otherTypes[0]?.id ?? 'even_odd';
+  let bestScore = -1;
+  for (const t of otherTypes) {
+    const matching = signals.filter(s => t.types.includes(s.type) && s.status === 'TRADE NOW');
+    const score = matching.reduce((sum, s) => sum + s.probability, 0);
+    if (score > bestScore) { bestScore = score; best = t.id; }
+  }
+  return best;
+}
 
 // ─── Draggable Orb Hook ───────────────────────────────────────────────────────
 function useDraggableOrb() {
@@ -308,8 +323,8 @@ function UnifiedSignalCard({ signal, rank, selected, lastDigit, isTop, marketLab
   const isWait = signal.status === 'WAIT';
   const entryMatch = signal.targetDigit !== undefined && lastDigit !== null && signal.targetDigit === lastDigit;
   const statusColor = isTradeNow ? '#10b981' : isWait ? '#f59e0b' : 'rgba(255,255,255,0.4)';
-  const statusBg = isTradeNow ? 'rgba(16,185,129,0.15)' : isWait ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.06)';
-  const statusBorder = isTradeNow ? 'rgba(16,185,129,0.3)' : isWait ? 'rgba(245,158,11,0.3)' : 'rgba(255,255,255,0.1)';
+  const statusBg = isTradeNow ? 'rgba(16,185,129,0.12)' : isWait ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.04)';
+  const statusBorder = isTradeNow ? 'rgba(16,185,129,0.25)' : isWait ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.08)';
 
   const rankBg = rank === 1 ? 'linear-gradient(135deg, #D61A8C, #8E44AD)'
     : rank === 2 ? 'linear-gradient(135deg, #0ea5e9, #6366f1)'
@@ -318,79 +333,54 @@ function UnifiedSignalCard({ signal, rank, selected, lastDigit, isTop, marketLab
 
   return (
     <div
-      className="rounded-2xl border transition-all duration-200 cursor-pointer"
+      className="rounded-lg border transition-all duration-200 cursor-pointer"
       style={{
-        borderColor: selected ? '#D61A8C' : (isTop && signal.windowsAligned) ? 'rgba(16,185,129,0.3)' : statusBorder,
-        background: selected ? 'rgba(214,26,140,0.08)' : 'rgba(255,255,255,0.03)',
-        backdropFilter: 'blur(8px)',
-        boxShadow: selected ? '0 0 0 2px rgba(214,26,140,0.3)' : undefined,
+        borderColor: selected ? '#D61A8C' : (isTop && signal.windowsAligned) ? 'rgba(16,185,129,0.25)' : statusBorder,
+        background: selected ? 'rgba(214,26,140,0.06)' : 'rgba(255,255,255,0.02)',
+        boxShadow: selected ? '0 0 0 1px rgba(214,26,140,0.4)' : undefined,
       }}
+      onClick={() => {/* selection handled by parent */}}
     >
-      <div className="p-3">
-        <div className="flex items-start gap-2 mb-2">
-          <div className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black text-white shrink-0 mt-0.5"
-            style={{ background: rankBg }}>
-            {rank}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[10px] font-black text-white/50 uppercase tracking-wider">{signal.label}</span>
-              {marketLabel && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/20">{marketLabel}</span>
-              )}
-              {signal.tradeDirection && (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full text-white"
-                  style={{ background: isTradeNow ? '#10b981' : '#f59e0b' }}>
-                  {signal.tradeDirection}
-                </span>
-              )}
-              {/* Windows-aligned badge only on best (rank 1) signal */}
-              {isTop && signal.windowsAligned && (
-                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-0.5">
-                  <Check size={8} /> ALIGNED
-                </span>
-              )}
-              {signal.window && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/10 text-white/50">{signal.window}T</span>
-              )}
-            </div>
-            <p className="text-xs font-semibold text-white/70 mt-0.5 leading-snug">{signal.recommendation}</p>
-          </div>
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            <span className="text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1"
-              style={{ background: statusBg, color: statusColor, border: `1px solid ${statusBorder}` }}>
-              {isTradeNow ? <Zap size={8} /> : null}
-              {signal.status}
-            </span>
-            <span className="text-sm font-black" style={{ color: statusColor }}>{signal.probability.toFixed(0)}%</span>
+      <div className="p-2 flex items-center gap-2">
+        {/* Rank badge */}
+        <div className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white shrink-0"
+          style={{ background: rankBg }}>
+          {rank}
+        </div>
+
+        {/* Core info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-black text-white/70 uppercase tracking-wider truncate">{signal.label}</span>
+            {signal.tradeDirection && (
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded text-white"
+                style={{ background: isTradeNow ? '#10b981' : '#f59e0b' }}>
+                {signal.tradeDirection}
+              </span>
+            )}
+            {isTop && signal.windowsAligned && (
+              <span className="text-[8px] font-black px-1 py-0.5 rounded bg-green-500/15 text-green-400 flex items-center gap-0.5">
+                <Check size={7} /> ALIGNED
+              </span>
+            )}
+            {entryMatch && (
+              <span className="text-[8px] font-black px-1 py-0.5 rounded bg-green-500/20 text-green-400">
+                MATCH
+              </span>
+            )}
           </div>
         </div>
 
-        <div className="w-full h-1.5 rounded-full overflow-hidden mb-2" style={{ background: 'rgba(255,255,255,0.06)' }}>
-          <div className="h-full rounded-full transition-all duration-700"
-            style={{
-              width: `${Math.min(signal.probability, 100)}%`,
-              background: isTradeNow ? 'linear-gradient(90deg, #10b981, #059669)' : isWait ? 'linear-gradient(90deg, #f59e0b, #d97706)' : 'rgba(255,255,255,0.2)',
-            }} />
-        </div>
-
-        <div className="flex items-start gap-1.5">
-          <Target size={10} className="text-white/40 mt-0.5 shrink-0" />
-          <p className="text-[10px] text-white/40 leading-snug flex-1">
-            <span className="font-bold text-white/60">Entry: </span>{signal.entryCondition}
-          </p>
-        </div>
-
-        {signal.targetDigit !== undefined && (
-          <div className={`mt-2 flex items-center gap-1.5 rounded-xl px-3 py-1.5 border ${entryMatch ? 'bg-green-500/10 border-green-500/30' : 'bg-white/5 border-white/10'}`}>
-            <div className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black text-white ${entryMatch ? 'bg-green-500' : 'bg-white/20'}`}>
-              {signal.targetDigit}
-            </div>
-            <span className={`text-[10px] font-bold ${entryMatch ? 'text-green-400' : 'text-white/40'}`}>
-              {entryMatch ? 'Entry digit matches last tick — TRADE NOW!' : `Waiting for digit ${signal.targetDigit}`}
-            </span>
+        {/* Probability + status */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-10 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+            <div className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(signal.probability, 100)}%`, background: statusColor }} />
           </div>
-        )}
+          <span className="text-[11px] font-black tabular-nums" style={{ color: statusColor }}>
+            {signal.probability.toFixed(0)}%
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -442,7 +432,9 @@ export default function Scanner() {
   const { isConnected, subscriptionState, subscribeSymbol } = ws;
   const trade = useDerivTrade(ws);
   const [apiToken, setApiToken] = useState<string | null>(null);
-  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [loadedBotName, setLoadedBotName] = useState<string | null>(null);
+  const [loadedBotConfig, setLoadedBotConfig] = useState<Partial<BotConfig> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [monitorSymbols, setMonitorSymbols] = useState<string[]>(['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V','BOOM1000','CRASH1000']);
   const monitorWS = useSharedMarketWS(monitorSymbols);
   const [recFallback2, setRecFallback2] = useState<string>('over_under');
@@ -579,28 +571,6 @@ export default function Scanner() {
     setPredictionChoice(null);
   }, []);
 
-  const handleLoadBot = useCallback(() => {
-    const signalToUse = selectedSignal || combinedSignals[0] || null;
-    const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
-    const tradeTypeLabel = TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? selectedTradeType;
-    const recovery = recMode
-      ? { lossThreshold: parseInt(recLossThreshold, 10) || 3, altTradeTypeId: recAltType }
-      : undefined;
-    const xml = generateBotXML({
-      stake, takeProfit, stopLoss, martingale,
-      symbol: selectedSymbol, tradeTypeLabel, bestSignal: signalToUse, entryDigit,
-      recovery,
-    });
-    const blob = new Blob([xml], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const tradeLabel = TRADE_TYPES.find(t => t.id === selectedTradeType)?.label?.replace(/[\s/]/g, '_') ?? selectedTradeType;
-    a.download = `proai_${tradeLabel}_${selectedSymbol}.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals, predictionChoice, recMode, recLossThreshold, recAltType]);
-
   // Map a Signal's tradeDirection to a Deriv contract_type + prediction
   const signalToContract = useCallback((sig: Signal | null, entryDigit?: number): { contractType: string; prediction?: number } => {
     if (!sig) return { contractType: 'DIGITOVER', prediction: 5 };
@@ -632,17 +602,12 @@ export default function Scanner() {
     return { contractType: 'DIGITOVER', prediction: entryDigit ?? 5 };
   }, [selectedTradeType]);
 
-  const handleAutoTrade = useCallback(() => {
-    if (!apiToken) {
-      setShowTokenModal(true);
-      return;
-    }
+  const buildTradeConfig = useCallback((): TradeConfig => {
     const signalToUse = selectedSignal || combinedSignals[0] || null;
     const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
     const { contractType, prediction } = signalToContract(signalToUse, entryDigit);
     const strategyLabel = signalToUse?.label ?? TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? selectedTradeType;
 
-    // Build fallback chain from user-selected recovery strategies
     const fallbackChain = recMode
       ? [
           { ...signalToContract({ ...signalToUse, tradeDirection: undefined, type: recAltType as SignalType }, undefined), strategyLabel: TRADE_TYPES.find(t => t.id === recAltType)?.label ?? recAltType },
@@ -651,7 +616,7 @@ export default function Scanner() {
         ].filter((s) => s.contractType)
       : undefined;
 
-    const config: TradeConfig = {
+    return {
       stake: parseFloat(stake) || 1,
       martingale: parseFloat(martingale) || 2,
       takeProfit: parseFloat(takeProfit) || 10,
@@ -663,18 +628,84 @@ export default function Scanner() {
       fallbackChain,
       lossThreshold: recMode ? (parseInt(recLossThreshold, 10) || 1) : undefined,
     };
+  }, [selectedSignal, combinedSignals, predictionChoice, stake, martingale, takeProfit, stopLoss, selectedSymbol, recMode, recLossThreshold, recAltType, recFallback2, recFallback3, signalToContract]);
+
+  const handleRunBot = useCallback(() => {
+    if (!apiToken) return;
+    const config = loadedBotConfig
+      ? { ...buildTradeConfig(), ...loadedBotConfig } as TradeConfig
+      : buildTradeConfig();
     trade.startTrade(config, apiToken);
-  }, [apiToken, selectedSignal, combinedSignals, predictionChoice, stake, martingale, takeProfit, stopLoss, selectedSymbol, recMode, recLossThreshold, recAltType, recFallback2, recFallback3, signalToContract, trade]);
+  }, [apiToken, loadedBotConfig, buildTradeConfig, trade]);
 
-  const handleSaveToken = useCallback((token: string) => {
-    setApiToken(token);
-    trade.setToken(token);
-    setShowTokenModal(false);
-  }, [trade]);
-
-  const handleStopTrade = useCallback(() => {
+  const handleStopBot = useCallback(() => {
     trade.stop();
   }, [trade]);
+
+  const handleFileLoad = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const xml = ev.target?.result as string;
+      const parsed = parseBotXML(xml);
+      setLoadedBotName(parsed.botName ?? file.name);
+      setLoadedBotConfig(parsed);
+      if (parsed.symbol) setSelectedSymbol(parsed.symbol);
+      if (parsed.contractType) {
+        const tt = TRADE_TYPES.find(t => {
+          if (parsed.contractType === 'DIGITEVEN' || parsed.contractType === 'DIGITODD') return t.id === 'even_odd';
+          if (parsed.contractType === 'DIGITOVER' || parsed.contractType === 'DIGITUNDER') return t.id === 'over_under';
+          if (parsed.contractType === 'DIGITMATCH') return t.id === 'matches';
+          if (parsed.contractType === 'DIGITDIFF') return t.id === 'differs';
+          if (parsed.contractType === 'CALL' || parsed.contractType === 'PUT') return t.id === 'rise_fall';
+          return false;
+        });
+        if (tt) setSelectedTradeType(tt.id);
+      }
+      if (parsed.stake) setStake(String(parsed.stake));
+      if (parsed.martingale) setMartingale(String(parsed.martingale));
+      if (parsed.takeProfit) setTakeProfit(String(parsed.takeProfit));
+      if (parsed.stopLoss) setStopLoss(String(parsed.stopLoss));
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, []);
+
+  // Iframe bridge — allows parent site to send commands
+  useIframeBridge({
+    onSetToken: (token: string) => {
+      setApiToken(token);
+      trade.setToken(token);
+    },
+    onLoadBot: (xml?: string, config?: Partial<BotConfig>) => {
+      if (xml) {
+        const parsed = parseBotXML(xml);
+        setLoadedBotName(parsed.botName ?? 'Remote Bot');
+        setLoadedBotConfig({ ...parsed, ...config });
+        if (parsed.symbol) setSelectedSymbol(parsed.symbol);
+      } else if (config) {
+        setLoadedBotConfig(config);
+        if (config.symbol) setSelectedSymbol(config.symbol);
+      }
+    },
+    onRunBot: () => handleRunBot(),
+    onStopBot: () => handleStopBot(),
+    getStatus: (): IframeStatus => ({
+      status: trade.state.status,
+      totalProfit: trade.state.totalProfit,
+      lossCount: trade.state.lossCount,
+      tradeCount: trade.state.tradeHistory.length,
+      balance: trade.state.balance,
+      currency: trade.state.currency,
+      error: trade.state.error,
+      loadedBot: loadedBotName,
+    }),
+  });
 
   const isTrading = trade.state.status !== 'idle' && trade.state.status !== 'stopped';
 
@@ -803,27 +834,31 @@ export default function Scanner() {
         </div>
       </div>
 
-      {/* Tab bar */}
+      {/* Tab bar — compact icon-based */}
       {!minimized && (
         <div className="flex border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
           {([
-            { id: 'scanner', label: 'Scanner' },
-            { id: 'monitor', label: 'Market Monitor' },
-            { id: 'journal', label: 'Journal' },
-          ] as { id: PanelTab; label: string }[]).map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="flex-1 py-2.5 text-[11px] font-black tracking-wide transition relative"
-              style={{ color: activeTab === tab.id ? '#fff' : 'rgba(255,255,255,0.35)' }}
-            >
-              {tab.label}
-              {activeTab === tab.id && (
-                <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full"
-                  style={{ background: 'linear-gradient(90deg,#D61A8C,#E67E22)' }} />
-              )}
-            </button>
-          ))}
+            { id: 'scanner', label: 'Scan', icon: Radar },
+            { id: 'monitor', label: 'Monitor', icon: LineChart },
+            { id: 'journal', label: 'Journal', icon: BookOpen },
+          ] as { id: PanelTab; label: string; icon: typeof Radar }[]).map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="flex-1 py-2 flex items-center justify-center gap-1.5 text-[10px] font-black tracking-wide transition relative"
+                style={{ color: activeTab === tab.id ? '#fff' : 'rgba(255,255,255,0.35)' }}
+              >
+                <Icon size={11} />
+                {tab.label}
+                {activeTab === tab.id && (
+                  <span className="absolute bottom-0 left-1/4 right-1/4 h-0.5 rounded-full"
+                    style={{ background: 'linear-gradient(90deg,#D61A8C,#E67E22)' }} />
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -1237,49 +1272,40 @@ export default function Scanner() {
                         )}
                   </div>
 
-                  {/* Bot action buttons */}
-                  <div className="grid grid-cols-3 gap-2">
-                    <button onClick={resetScan} className="border rounded-xl text-white/60 text-xs font-black py-3 transition active:scale-95"
-                      style={{ borderColor: 'rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)' }}>
-                      New Scan
-                    </button>
-                    <button onClick={handleLoadBot} className="bg-green-500 hover:bg-green-600 text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1">
-                      <Download size={12} />
-                      Load Bot
-                    </button>
-                    <button onClick={handleAutoTrade} disabled={isTrading}
-                      className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                      style={{ background: 'linear-gradient(135deg, #D61A8C, #8E44AD)' }}>
-                      <Zap size={12} />
-                      Auto Trade
-                    </button>
-                  </div>
+                  {/* Loaded bot indicator */}
+                  {loadedBotName && (
+                    <div className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+                      style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                      <Check size={10} className="text-green-400" />
+                      <span className="text-[10px] font-bold text-green-300 truncate">{loadedBotName}</span>
+                    </div>
+                  )}
 
-                  {/* API token status + trade controls */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      onClick={() => setShowTokenModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition"
-                      style={{
-                        background: apiToken ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.05)',
-                        border: `1px solid ${apiToken ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.12)'}`,
-                        color: apiToken ? '#4ade80' : 'rgba(255,255,255,0.5)',
-                      }}
-                    >
-                      <KeyRound size={10} />
-                      {apiToken ? 'Token Set' : 'Set API Token'}
+                  {/* Bot action buttons */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={handleFileLoad}
+                      className="border rounded-xl text-white/80 text-xs font-black py-3 transition active:scale-95 flex items-center justify-center gap-1.5"
+                      style={{ borderColor: 'rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)' }}>
+                      <Upload size={12} />
+                      Load
                     </button>
-                    {isTrading && (
-                      <button
-                        onClick={handleStopTrade}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black text-white transition active:scale-95"
-                        style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}
-                      >
-                        <Square size={10} fill="white" />
-                        Stop Trading
+                    {isTrading ? (
+                      <button onClick={handleStopBot}
+                        className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5"
+                        style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}>
+                        <Square size={12} fill="white" />
+                        Stop
+                      </button>
+                    ) : (
+                      <button onClick={handleRunBot} disabled={!apiToken}
+                        className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                        style={{ background: 'linear-gradient(135deg, #D61A8C, #8E44AD)' }}>
+                        <Play size={12} fill="white" />
+                        Run
                       </button>
                     )}
                   </div>
+                  <input ref={fileInputRef} type="file" accept=".xml" onChange={handleFileChange} className="hidden" />
 
                   {/* Live trade panel */}
                   {isTrading && (
@@ -1406,755 +1432,7 @@ export default function Scanner() {
     <>
       {step === 'orb' && orbEl}
       {panel}
-      <ApiTokenModal
-        open={showTokenModal}
-        initialToken={apiToken}
-        onSave={handleSaveToken}
-        onClose={() => setShowTokenModal(false)}
-      />
     </>
   );
 }
 
-// ─── XML Bot Generator ─────────────────────────────────────────────────────────
-
-function mapAltTradeType(tradeTypeId: string): {
-  purchaseType: string; entryOp: string; entryThreshold: number;
-  prediction: number; tradeTypeCat: string; tradeType: string; hasPrediction: boolean;
-} {
-  switch (tradeTypeId) {
-    case 'even_odd':
-      return { purchaseType: 'DIGITEVEN', entryOp: 'EQ', entryThreshold: 1, prediction: 0, tradeTypeCat: 'digits', tradeType: 'evenodd', hasPrediction: false };
-    case 'over_under':
-      return { purchaseType: 'DIGITOVER', entryOp: 'LTE', entryThreshold: 2, prediction: 2, tradeTypeCat: 'digits', tradeType: 'overunder', hasPrediction: true };
-    case 'matches':
-      return { purchaseType: 'DIGITMATCH', entryOp: 'EQ', entryThreshold: 5, prediction: 5, tradeTypeCat: 'digits', tradeType: 'matchesdiffers', hasPrediction: true };
-    case 'differs':
-      return { purchaseType: 'DIGITDIFF', entryOp: 'NEQ', entryThreshold: 5, prediction: 5, tradeTypeCat: 'digits', tradeType: 'matchesdiffers', hasPrediction: true };
-    case 'rise_fall':
-      return { purchaseType: 'CALL', entryOp: 'GTE', entryThreshold: 5, prediction: 0, tradeTypeCat: 'callput', tradeType: 'risefall', hasPrediction: false };
-    default:
-      return { purchaseType: 'DIGITEVEN', entryOp: 'EQ', entryThreshold: 1, prediction: 0, tradeTypeCat: 'digits', tradeType: 'evenodd', hasPrediction: false };
-  }
-}
-
-function suggestAltTradeType(currentTypeId: string, signals: Signal[]): string {
-  const hasStrong = (types: string[]) => signals.some(s =>
-    types.includes(s.type) && s.status === 'TRADE NOW' && s.probability >= 55
-  );
-  const suggestions: Record<string, string> = {
-    over_under: 'even_odd',
-    even_odd: 'over_under',
-    matches: 'differs',
-    differs: 'matches',
-    rise_fall: 'even_odd',
-    pro_over_under: 'pro_even_odd',
-    pro_even_odd: 'pro_over_under',
-  };
-  const suggested = suggestions[currentTypeId] ?? 'even_odd';
-  const altTradeTypeMap: Record<string, string[]> = {
-    even_odd: ['even_odd', 'pro_even_odd'],
-    over_under: ['over_under', 'pro_over_under', 'under_7', 'over_2'],
-    matches: ['matches'],
-    differs: ['differs'],
-    rise_fall: ['rise_fall'],
-  };
-  if (hasStrong(altTradeTypeMap[suggested] ?? ['even_odd'])) return suggested;
-  for (const alt of ['even_odd', 'over_under', 'matches', 'differs', 'rise_fall']) {
-    if (alt === currentTypeId) continue;
-    if (hasStrong(altTradeTypeMap[alt] ?? [])) return alt;
-  }
-  return suggested;
-}
-
-function generateBotXML(opts: {
-  stake: string;
-  takeProfit: string;
-  stopLoss: string;
-  martingale: string;
-  symbol: string;
-  tradeTypeLabel: string;
-  bestSignal: Signal | null;
-  entryDigit?: number;
-  recovery?: { lossThreshold: number; altTradeTypeId: string };
-}): string {
-  const { stake, takeProfit, stopLoss, martingale, symbol, tradeTypeLabel, bestSignal, entryDigit, recovery } = opts;
-
-  let tradeTypeCat = 'digits';
-  let tradeType = 'overunder';
-  let predictionNum = 7;  // unused but kept for fallback
-  let underDigitNum = 7;
-  let overDigitNum = 2;
-  let singleMode = false;
-  let singlePurchaseType = 'DIGITUNDER';
-  let singleEntryOp = 'GTE';
-  let singleEntryThreshold = 6;
-  let singlePrediction = 7;
-
-  if (bestSignal) {
-    const dir = (bestSignal.tradeDirection ?? '').toUpperCase();
-    const td = bestSignal.targetDigit;
-
-    // Parse OVER X / UNDER X dynamically
-    const overMatch = dir.match(/^OVER\s+(\d+)$/);
-    const underMatch = dir.match(/^UNDER\s+(\d+)$/);
-    const matchesMatch = dir.match(/^MATCHES\s+(\d+)$/);
-    const differsMatch = dir.match(/^DIFFERS\s+(\d+)$/);
-
-    if (underMatch) {
-      const underDigit = parseInt(underMatch[1], 10);
-      tradeTypeCat = 'digits'; tradeType = 'overunder';
-      // Single mode: fixed UNDER prediction from analysis — no alternating
-      singleMode = true; singlePurchaseType = 'DIGITUNDER';
-      singlePrediction = underDigit;
-      // Entry: wait for a digit >= underDigit (at or above the barrier) to trigger entry
-      singleEntryOp = 'GTE'; singleEntryThreshold = underDigit;
-    } else if (overMatch) {
-      const overDigit = parseInt(overMatch[1], 10);
-      tradeTypeCat = 'digits'; tradeType = 'overunder';
-      // Single mode: fixed OVER prediction from analysis — no alternating
-      singleMode = true; singlePurchaseType = 'DIGITOVER';
-      singlePrediction = overDigit;
-      // Entry: wait for a digit <= overDigit (at or below the barrier) to trigger entry
-      singleEntryOp = 'LTE'; singleEntryThreshold = overDigit;
-    } else if (dir === 'EVEN') {
-      tradeTypeCat = 'digits'; tradeType = 'evenodd';
-      singleMode = true; singlePurchaseType = 'DIGITEVEN';
-      // Entry: last digit must be ODD (1,3,5,7,9) → remainder when divided by 2 equals 1
-      singlePrediction = 0; singleEntryOp = 'EQ'; singleEntryThreshold = 1;
-    } else if (dir === 'ODD') {
-      tradeTypeCat = 'digits'; tradeType = 'evenodd';
-      singleMode = true; singlePurchaseType = 'DIGITODD';
-      // Entry: last digit must be EVEN (0,2,4,6,8) → remainder when divided by 2 equals 0
-      singlePrediction = 0; singleEntryOp = 'EQ'; singleEntryThreshold = 0;
-    } else if (matchesMatch) {
-      const matchDigit = parseInt(matchesMatch[1], 10);
-      tradeTypeCat = 'digits'; tradeType = 'matchesdiffers';
-      singleMode = true; singlePurchaseType = 'DIGITMATCH';
-      // Entry: wait for the match digit to appear (confirming it's active/trending)
-      singlePrediction = matchDigit; singleEntryOp = 'EQ'; singleEntryThreshold = matchDigit;
-    } else if (differsMatch) {
-      const differDigit = parseInt(differsMatch[1], 10);
-      tradeTypeCat = 'digits'; tradeType = 'matchesdiffers';
-      singleMode = true; singlePurchaseType = 'DIGITDIFF';
-      // Entry: wait for a dominant digit (NOT the differ digit) to appear — that's the signal to buy differs
-      singlePrediction = differDigit; singleEntryOp = 'NEQ'; singleEntryThreshold = differDigit;
-    } else if (dir === 'RISE') {
-      tradeTypeCat = 'callput'; tradeType = 'risefall';
-      singleMode = true; singlePurchaseType = 'CALL';
-      singlePrediction = 0; singleEntryOp = 'GTE'; singleEntryThreshold = 5;
-    } else if (dir === 'FALL') {
-      tradeTypeCat = 'callput'; tradeType = 'risefall';
-      singleMode = true; singlePurchaseType = 'PUT';
-      singlePrediction = 0; singleEntryOp = 'LTE'; singleEntryThreshold = 4;
-    }
-
-    // User-selected entry digit overrides the derived prediction/barrier
-    if (entryDigit !== undefined) {
-      if (overMatch || underMatch) {
-        singlePrediction = entryDigit;
-        if (overMatch) { singleEntryOp = 'LTE'; singleEntryThreshold = entryDigit; }
-        else { singleEntryOp = 'GTE'; singleEntryThreshold = entryDigit; }
-      } else if (matchesMatch || differsMatch) {
-        singlePrediction = entryDigit;
-        singleEntryThreshold = entryDigit;
-      }
-    }
-  }
-
-  const noPredictionTypes = ['CALL', 'PUT', 'DIGITEVEN', 'DIGITODD'];
-  const hasPrediction = singleMode ? !noPredictionTypes.includes(singlePurchaseType) : true;
-  const predVal = singleMode ? singlePrediction : predictionNum;
-
-  // Even/Odd: entry check is parity (last_digit % 2 == expectedRemainder)
-  // EVEN trade → wait for ODD last digit (remainder 1), ODD trade → wait for EVEN last digit (remainder 0)
-  const isEvenOddParity = singlePurchaseType === 'DIGITEVEN' || singlePurchaseType === 'DIGITODD';
-  const parityRemainder = singlePurchaseType === 'DIGITEVEN' ? 1 : 0; // EVEN waits for odd entry digit
-
-  const altMap = recovery ? mapAltTradeType(recovery.altTradeTypeId) : null;
-
-  const altPurchaseXml = recovery && altMap ? `
-      <block type="controls_if" id="bp_rec_if">
-        <value name="IF0">
-          <block type="variables_get" id="bp_rec_get">
-            <field name="VAR" id="v_rec_mode">Recovery Mode</field>
-          </block>
-        </value>
-        <statement name="DO0">
-          <block type="purchase" id="bp_rec_pur">
-            <field name="PURCHASE_LIST">${altMap.purchaseType}</field>
-          </block>
-        </statement>
-        <statement name="ELSE">
-          <block type="controls_if" id="bp_if1">
-            <value name="IF0">
-              <block type="logic_compare" id="bp_cmp1">
-                <field name="OP">${isEvenOddParity ? 'EQ' : singleEntryOp}</field>
-                <value name="A">
-                  ${isEvenOddParity ? `<block type="math_arithmetic" id="bp_mod_arith">
-                    <field name="OP">MODULO</field>
-                    <value name="A">
-                      <shadow type="math_number" id="bp_mod_a_sh"><field name="NUM">0</field></shadow>
-                      <block type="last_digit" id="bp_ld1"></block>
-                    </value>
-                    <value name="B">
-                      <shadow type="math_number" id="bp_mod_b_sh"><field name="NUM">2</field></shadow>
-                      <block type="math_number" id="bp_mod_b"><field name="NUM">2</field></block>
-                    </value>
-                  </block>` : `<block type="last_digit" id="bp_ld1"></block>`}
-                </value>
-                <value name="B">
-                  <block type="math_number" id="bp_mn1">
-                    <field name="NUM">${isEvenOddParity ? parityRemainder : singleEntryThreshold}</field>
-                  </block>
-                </value>
-              </block>
-            </value>
-            <statement name="DO0">
-              <block type="purchase" id="bp_pur1">
-                <field name="PURCHASE_LIST">${singlePurchaseType}</field>
-              </block>
-            </statement>
-          </block>
-        </statement>
-      </block>` : '';
-
-  const beforePurchaseStack = recovery
-    ? altPurchaseXml
-    : singleMode
-      ? isEvenOddParity
-        ? `
-      <block type="controls_if" id="bp_if1">
-        <value name="IF0">
-          <block type="logic_compare" id="bp_cmp1">
-            <field name="OP">EQ</field>
-            <value name="A">
-              <block type="math_arithmetic" id="bp_mod_arith">
-                <field name="OP">MODULO</field>
-                <value name="A">
-                  <shadow type="math_number" id="bp_mod_a_sh"><field name="NUM">0</field></shadow>
-                  <block type="last_digit" id="bp_ld1"></block>
-                </value>
-                <value name="B">
-                  <shadow type="math_number" id="bp_mod_b_sh"><field name="NUM">2</field></shadow>
-                  <block type="math_number" id="bp_mod_b"><field name="NUM">2</field></block>
-                </value>
-              </block>
-            </value>
-            <value name="B">
-              <block type="math_number" id="bp_mn1">
-                <field name="NUM">${parityRemainder}</field>
-              </block>
-            </value>
-          </block>
-        </value>
-        <statement name="DO0">
-          <block type="purchase" id="bp_pur1">
-            <field name="PURCHASE_LIST">${singlePurchaseType}</field>
-          </block>
-        </statement>
-      </block>`
-        : `
-      <block type="controls_if" id="bp_if1">
-        <value name="IF0">
-          <block type="logic_compare" id="bp_cmp1">
-            <field name="OP">${singleEntryOp}</field>
-            <value name="A">
-              <block type="last_digit" id="bp_ld1"></block>
-            </value>
-            <value name="B">
-              <block type="math_number" id="bp_mn1">
-                <field name="NUM">${singleEntryThreshold}</field>
-              </block>
-            </value>
-          </block>
-        </value>
-        <statement name="DO0">
-          <block type="purchase" id="bp_pur1">
-            <field name="PURCHASE_LIST">${singlePurchaseType}</field>
-          </block>
-        </statement>
-      </block>`
-      : `
-      <block type="controls_if" id="bp_if1">
-        <value name="IF0">
-          <block type="logic_compare" id="bp_cmp1">
-            <field name="OP">GTE</field>
-            <value name="A">
-              <block type="last_digit" id="bp_ld1"></block>
-            </value>
-            <value name="B">
-              <block type="math_number" id="bp_mn1">
-                <field name="NUM">0</field>
-              </block>
-            </value>
-          </block>
-        </value>
-        <statement name="DO0">
-          <block type="purchase" id="bp_pur1">
-            <field name="PURCHASE_LIST">DIGITOVER</field>
-          </block>
-        </statement>
-      </block>`;
-
-  const recLossThreshold = recovery?.lossThreshold ?? 3;
-
-  const winRecResetXml = recovery ? `
-                        <next>
-                          <block type="variables_set" id="ap_win_rec_rst">
-                            <field name="VAR" id="v_rec_mode">Recovery Mode</field>
-                            <value name="VALUE">
-                              <block type="logic_boolean" id="lb_win_rec">
-                                <field name="BOOL">FALSE</field>
-                              </block>
-                            </value>` : '';
-
-  const winRecCloseXml = recovery ? `
-                          </block>
-                        </next>` : '';
-
-  const lossRecCheckXml = recovery ? `
-                        <next>
-                          <block type="controls_if" id="ap_loss_rec_chk">
-                            <value name="IF0">
-                              <block type="logic_compare" id="ap_loss_rec_cmp">
-                                <field name="OP">GTE</field>
-                                <value name="A">
-                                  <block type="variables_get" id="ap_loss_lc_get">
-                                    <field name="VAR" id="v_loss_cnt">Loss Count</field>
-                                  </block>
-                                </value>
-                                <value name="B">
-                                  <block type="math_number" id="ap_loss_thresh">
-                                    <field name="NUM">${recLossThreshold}</field>
-                                  </block>
-                                </value>
-                              </block>
-                            </value>
-                            <statement name="DO0">
-                              <block type="variables_set" id="ap_loss_rec_set">
-                                <field name="VAR" id="v_rec_mode">Recovery Mode</field>
-                                <value name="VALUE">
-                                  <block type="logic_boolean" id="lb_loss_rec">
-                                    <field name="BOOL">TRUE</field>
-                                  </block>
-                                </value>
-                              </block>
-                            </statement>` : '';
-
-  const lossRecCloseXml = recovery ? `
-                          </block>
-                        </next>` : '';
-
-  const afterPurchaseWinLoss = singleMode
-    ? `
-              <block type="controls_if" id="ap_wl">
-                <mutation xmlns="http://www.w3.org/1999/xhtml" else="1"></mutation>
-                <value name="IF0">
-                  <block type="contract_check_result" id="ap_win_chk">
-                    <field name="CHECK_RESULT">win</field>
-                  </block>
-                </value>
-                <statement name="DO0">
-                  <block type="variables_set" id="ap_win_rs">
-                    <field name="VAR" id="v_stake">Stake</field>
-                    <value name="VALUE">
-                      <block type="variables_get" id="ap_win_init">
-                        <field name="VAR" id="v_init_stake">Initial Stake</field>
-                      </block>
-                    </value>
-                    <next>
-                      <block type="variables_set" id="ap_win_lc">
-                        <field name="VAR" id="v_loss_cnt">Loss Count</field>
-                        <value name="VALUE">
-                          <block type="math_number" id="ap_win_lc_zero">
-                            <field name="NUM">0</field>
-                          </block>
-                        </value>${winRecResetXml}
-                        <next>
-                          <block type="trade_again" id="ap_win_ta"></block>
-                        </next>
-                      </block>${winRecCloseXml}
-                    </next>
-                  </block>
-                </statement>
-                <statement name="ELSE">
-                  <block type="variables_set" id="ap_loss_mg">
-                    <field name="VAR" id="v_stake">Stake</field>
-                    <value name="VALUE">
-                      <block type="math_arithmetic" id="ap_mg_arith">
-                        <field name="OP">MULTIPLY</field>
-                        <value name="A">
-                          <shadow type="math_number" id="ap_mg_a_sh">
-                            <field name="NUM">1</field>
-                          </shadow>
-                          <block type="variables_get" id="ap_mg_stake_get">
-                            <field name="VAR" id="v_stake">Stake</field>
-                          </block>
-                        </value>
-                        <value name="B">
-                          <shadow type="math_number" id="ap_mg_b_sh">
-                            <field name="NUM">2</field>
-                          </shadow>
-                          <block type="variables_get" id="ap_mg_get">
-                            <field name="VAR" id="v_mg">Martingale</field>
-                          </block>
-                        </value>
-                      </block>
-                    </value>
-                    <next>
-                      <block type="math_change" id="ap_loss_lc_inc">
-                        <field name="VAR" id="v_loss_cnt">Loss Count</field>
-                        <value name="DELTA">
-                          <shadow type="math_number" id="ap_lc_delta">
-                            <field name="NUM">1</field>
-                          </shadow>
-                        </value>${lossRecCheckXml}
-                        <next>
-                          <block type="trade_again" id="ap_loss_ta"></block>
-                        </next>
-                      </block>${lossRecCloseXml}
-                    </next>
-                  </block>
-                </statement>
-              </block>`
-    : `
-              <block type="controls_if" id="ap_wl">
-                <mutation xmlns="http://www.w3.org/1999/xhtml" else="1"></mutation>
-                <value name="IF0">
-                  <block type="contract_check_result" id="ap_win_chk">
-                    <field name="CHECK_RESULT">win</field>
-                  </block>
-                </value>
-                <statement name="DO0">
-                  <block type="variables_set" id="ap_win_rs">
-                    <field name="VAR" id="v_stake">Stake</field>
-                    <value name="VALUE">
-                      <block type="variables_get" id="ap_win_init">
-                        <field name="VAR" id="v_init_stake">Initial Stake</field>
-                      </block>
-                    </value>
-                    <next>
-                      <block type="variables_set" id="ap_win_lc">
-                        <field name="VAR" id="v_loss_cnt">Loss Count</field>
-                        <value name="VALUE">
-                          <block type="math_number" id="ap_win_lc_zero">
-                            <field name="NUM">0</field>
-                          </block>
-                        </value>${winRecResetXml}
-                        <next>
-                          <block type="trade_again" id="ap_win_ta"></block>
-                        </next>
-                      </block>${winRecCloseXml}
-                    </next>
-                  </block>
-                </statement>
-                <statement name="ELSE">
-                  <block type="variables_set" id="ap_loss_mg">
-                    <field name="VAR" id="v_stake">Stake</field>
-                    <value name="VALUE">
-                      <block type="math_arithmetic" id="ap_mg_arith">
-                        <field name="OP">MULTIPLY</field>
-                        <value name="A">
-                          <shadow type="math_number" id="ap_mg_a_sh">
-                            <field name="NUM">1</field>
-                          </shadow>
-                          <block type="variables_get" id="ap_mg_stake_get">
-                            <field name="VAR" id="v_stake">Stake</field>
-                          </block>
-                        </value>
-                        <value name="B">
-                          <shadow type="math_number" id="ap_mg_b_sh">
-                            <field name="NUM">2</field>
-                          </shadow>
-                          <block type="variables_get" id="ap_mg_get">
-                            <field name="VAR" id="v_mg">Martingale</field>
-                          </block>
-                        </value>
-                      </block>
-                    </value>
-                    <next>
-                      <block type="math_change" id="ap_loss_lc_inc">
-                        <field name="VAR" id="v_loss_cnt">Loss Count</field>
-                        <value name="DELTA">
-                          <shadow type="math_number" id="ap_lc_delta">
-                            <field name="NUM">1</field>
-                          </shadow>
-                        </value>${lossRecCheckXml}
-                        <next>
-                          <block type="trade_again" id="ap_loss_ta"></block>
-                        </next>
-                      </block>${lossRecCloseXml}
-                    </next>
-                  </block>
-                </statement>
-              </block>`;
-
-  const extraVars = singleMode
-    ? ''
-    : `
-    <variable id="v_pred">Prediction</variable>
-    <variable id="v_under_digit">Under Digit</variable>
-    <variable id="v_over_digit">Over Digit</variable>`;
-
-  const recoveryInitXml = recovery ? `
-                                <next>
-                                  <block type="variables_set" id="vs_rec_mode">
-                                    <field name="VAR" id="v_rec_mode">Recovery Mode</field>
-                                    <value name="VALUE">
-                                      <block type="logic_boolean" id="lb_rec_mode">
-                                        <field name="BOOL">FALSE</field>
-                                      </block>
-                                    </value>
-                                  </block>
-                                </next>` : '';
-
-  const extraInit = singleMode
-    ? recovery ? `
-                        <next>
-                          <block type="variables_set" id="vs_rec_mode">
-                            <field name="VAR" id="v_rec_mode">Recovery Mode</field>
-                            <value name="VALUE">
-                              <block type="logic_boolean" id="lb_rec_mode">
-                                <field name="BOOL">FALSE</field>
-                              </block>
-                            </value>
-                          </block>
-                        </next>` : ''
-    : `
-                        <next>
-                          <block type="variables_set" id="vs_under">
-                            <field name="VAR" id="v_under_digit">Under Digit</field>
-                            <value name="VALUE">
-                              <block type="math_number" id="mn_under">
-                                <field name="NUM">${underDigitNum}</field>
-                              </block>
-                            </value>
-                            <next>
-                              <block type="variables_set" id="vs_over">
-                                <field name="VAR" id="v_over_digit">Over Digit</field>
-                                <value name="VALUE">
-                                  <block type="math_number" id="mn_over">
-                                    <field name="NUM">${overDigitNum}</field>
-                                  </block>
-                                </value>
-                                <next>
-                                  <block type="variables_set" id="vs_pred">
-                                    <field name="VAR" id="v_pred">Prediction</field>
-                                    <value name="VALUE">
-                                      <block type="variables_get" id="vg_under_init">
-                                        <field name="VAR" id="v_under_digit">Under Digit</field>
-                                      </block>
-                                    </value>${recoveryInitXml}
-                                  </block>
-                                </next>
-                              </block>
-                            </next>
-                          </block>
-                        </next>`;
-
-  const predictionBlock = hasPrediction
-    ? `
-        <value name="PREDICTION">
-          <block type="math_number_positive" id="pred_block">
-            <field name="NUM">${predVal}</field>
-          </block>
-        </value>`
-    : '';
-
-  return `<xml xmlns="https://developers.google.com/blockly/xml" is_dbot="true" collection="false">
-  <variables>
-    <variable id="v_stake">Stake</variable>
-    <variable id="v_init_stake">Initial Stake</variable>
-    <variable id="v_tp">Take Profit</variable>
-    <variable id="v_sl">Stop Loss</variable>
-    <variable id="v_mg">Martingale</variable>
-    <variable id="v_loss_cnt">Loss Count</variable>
-    <variable id="v_rec_mode">Recovery Mode</variable>${extraVars}
-  </variables>
-
-  <block type="trade_definition" id="td_main" deletable="false" x="0" y="60">
-    <statement name="TRADE_OPTIONS">
-      <block type="trade_definition_market" id="tdm1" deletable="false" movable="false">
-        <field name="MARKET_LIST">synthetic_index</field>
-        <field name="SUBMARKET_LIST">random_index</field>
-        <field name="SYMBOL_LIST">${symbol}</field>
-        <next>
-          <block type="trade_definition_tradetype" id="tdt1" deletable="false" movable="false">
-            <field name="TRADETYPECAT_LIST">${tradeTypeCat}</field>
-            <field name="TRADETYPE_LIST">${tradeType}</field>
-            <next>
-              <block type="trade_definition_contracttype" id="tdct1" deletable="false" movable="false">
-                <field name="TYPE_LIST">${singlePurchaseType === 'DIGITMATCH' ? 'DIGITMATCH' : singlePurchaseType === 'DIGITDIFF' ? 'DIGITDIFF' : 'both'}</field>
-                <next>
-                  <block type="trade_definition_candleinterval" id="tdci1" deletable="false" movable="false">
-                    <field name="CANDLEINTERVAL_LIST">60</field>
-                    <next>
-                      <block type="trade_definition_restartbuysell" id="tdrbs1" deletable="false" movable="false">
-                        <field name="TIME_MACHINE_ENABLED">FALSE</field>
-                        <next>
-                          <block type="trade_definition_restartonerror" id="tdroe1" deletable="false" movable="false">
-                            <field name="RESTARTONERROR">TRUE</field>
-                          </block>
-                        </next>
-                      </block>
-                    </next>
-                  </block>
-                </next>
-              </block>
-            </next>
-          </block>
-        </next>
-      </block>
-    </statement>
-
-    <statement name="INITIALIZATION">
-      <block type="variables_set" id="vs_stake">
-        <field name="VAR" id="v_stake">Stake</field>
-        <value name="VALUE">
-          <block type="math_number" id="mn_stake">
-            <field name="NUM">${stake}</field>
-          </block>
-        </value>
-        <next>
-          <block type="variables_set" id="vs_init_stake">
-            <field name="VAR" id="v_init_stake">Initial Stake</field>
-            <value name="VALUE">
-              <block type="math_number" id="mn_init">
-                <field name="NUM">${stake}</field>
-              </block>
-            </value>
-            <next>
-              <block type="variables_set" id="vs_tp">
-                <field name="VAR" id="v_tp">Take Profit</field>
-                <value name="VALUE">
-                  <block type="math_number" id="mn_tp">
-                    <field name="NUM">${takeProfit}</field>
-                  </block>
-                </value>
-                <next>
-                  <block type="variables_set" id="vs_sl">
-                    <field name="VAR" id="v_sl">Stop Loss</field>
-                    <value name="VALUE">
-                      <block type="math_number" id="mn_sl">
-                        <field name="NUM">${stopLoss}</field>
-                      </block>
-                    </value>
-                    <next>
-                      <block type="variables_set" id="vs_mg">
-                        <field name="VAR" id="v_mg">Martingale</field>
-                        <value name="VALUE">
-                          <block type="math_number" id="mn_mg">
-                            <field name="NUM">${martingale}</field>
-                          </block>
-                        </value>
-                        <next>
-                          <block type="variables_set" id="vs_loss_cnt">
-                            <field name="VAR" id="v_loss_cnt">Loss Count</field>
-                            <value name="VALUE">
-                              <block type="math_number" id="mn_lc">
-                                <field name="NUM">0</field>
-                              </block>
-                            </value>${extraInit}
-                          </block>
-                        </next>
-                      </block>
-                    </next>
-                  </block>
-                </next>
-              </block>
-            </next>
-          </block>
-        </next>
-      </block>
-    </statement>
-
-    <statement name="SUBMARKET">
-      <block type="trade_definition_tradeoptions" id="tdto1">
-        <mutation xmlns="http://www.w3.org/1999/xhtml" has_first_barrier="false" has_second_barrier="false" has_prediction="${hasPrediction}"></mutation>
-        <field name="DURATIONTYPE_LIST">t</field>
-        <value name="DURATION">
-          <shadow type="math_number_positive" id="dur1">
-            <field name="NUM">1</field>
-          </shadow>
-        </value>
-        <value name="AMOUNT">
-          <shadow type="math_number_positive" id="amt1">
-            <field name="NUM">${stake}</field>
-          </shadow>
-          <block type="variables_get" id="vg_stake_sub">
-            <field name="VAR" id="v_stake">Stake</field>
-          </block>
-        </value>${predictionBlock}
-      </block>
-    </statement>
-  </block>
-
-  <block type="before_purchase" id="bp1" deletable="false" x="0" y="900">
-    <statement name="BEFOREPURCHASE_STACK">
-      ${beforePurchaseStack}
-    </statement>
-  </block>
-
-  <block type="after_purchase" id="ap1" collapsed="true" x="900" y="60">
-    <statement name="AFTERPURCHASE_STACK">
-      <block type="controls_if" id="ap_if_tp_sl">
-        <mutation xmlns="http://www.w3.org/1999/xhtml" elseif="1" else="1"></mutation>
-
-        <value name="IF0">
-          <block type="logic_compare" id="ap_cmp_tp">
-            <field name="OP">GTE</field>
-            <value name="A">
-              <block type="total_profit" id="ap_tp_val"></block>
-            </value>
-            <value name="B">
-              <block type="variables_get" id="ap_vg_tp">
-                <field name="VAR" id="v_tp">Take Profit</field>
-              </block>
-            </value>
-          </block>
-        </value>
-        <statement name="DO0">
-          <block type="text_print" id="ap_tp_msg">
-            <value name="TEXT">
-              <shadow type="text" id="ap_tp_shadow">
-                <field name="TEXT">Pro AI ${tradeTypeLabel}: Take Profit Hit!</field>
-              </shadow>
-            </value>
-          </block>
-        </statement>
-
-        <value name="IF1">
-          <block type="logic_compare" id="ap_cmp_sl">
-            <field name="OP">GTE</field>
-            <value name="A">
-              <block type="variables_get" id="ap_vg_lc">
-                <field name="VAR" id="v_loss_cnt">Loss Count</field>
-              </block>
-            </value>
-            <value name="B">
-              <block type="variables_get" id="ap_vg_sl">
-                <field name="VAR" id="v_sl">Stop Loss</field>
-              </block>
-            </value>
-          </block>
-        </value>
-        <statement name="DO1">
-          <block type="text_print" id="ap_sl_msg">
-            <value name="TEXT">
-              <shadow type="text" id="ap_sl_shadow">
-                <field name="TEXT">Pro AI ${tradeTypeLabel}: Stop Loss Reached.</field>
-              </shadow>
-            </value>
-          </block>
-        </statement>
-
-        <statement name="ELSE">
-          ${afterPurchaseWinLoss}
-        </statement>
-      </block>
-    </statement>
-  </block>
-
-</xml>`;
-}
