@@ -25,6 +25,7 @@ import MarketMonitor from './MarketMonitor';
 import ApiTokenModal from './ApiTokenModal';
 import { useDerivWS } from '../hooks/useDerivWS';
 import { useDerivTrade, TradeConfig } from '../hooks/useDerivTrade';
+import { useSharedMarketWS } from '../hooks/useSharedMarketWS';
 import { analyzeMultiWindow, MultiWindowAnalysis } from '../lib/analysis';
 import { generateCombinedRankedSignals, Signal, SignalType } from '../lib/signals';
 import { SYMBOLS } from '../lib/symbols';
@@ -441,6 +442,8 @@ export default function Scanner() {
   const trade = useDerivTrade(ws);
   const [apiToken, setApiToken] = useState<string | null>(null);
   const [showTokenModal, setShowTokenModal] = useState(false);
+  const [monitorSymbols, setMonitorSymbols] = useState<string[]>(['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V','BOOM1000','CRASH1000']);
+  const monitorWS = useSharedMarketWS(monitorSymbols);
   const orb = useDraggableOrb();
 
   const allowedTypes = useMemo(() => {
@@ -1320,6 +1323,10 @@ export default function Scanner() {
             <div className="p-3 flex-1 flex flex-col min-h-0">
               <MarketMonitor
                 embedded
+                isConnected={monitorWS.isConnected}
+                markets={monitorWS.markets}
+                selectedSymbols={monitorSymbols}
+                setSelectedSymbols={setMonitorSymbols}
                 onSelectSymbol={(symId) => {
                   setSelectedSymbol(symId);
                   setActiveTab('scanner');
