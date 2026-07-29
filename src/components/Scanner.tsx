@@ -22,6 +22,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import MarketMonitor from './MarketMonitor';
+import TradeJournal from './TradeJournal';
 import ApiTokenModal from './ApiTokenModal';
 import { useDerivWS } from '../hooks/useDerivWS';
 import { useDerivTrade, TradeConfig } from '../hooks/useDerivTrade';
@@ -31,7 +32,7 @@ import { generateCombinedRankedSignals, Signal, SignalType } from '../lib/signal
 import { SYMBOLS } from '../lib/symbols';
 
 type Step = 'orb' | 'open' | 'scanning';
-type PanelTab = 'scanner' | 'monitor';
+type PanelTab = 'scanner' | 'monitor' | 'journal';
 
 const TRADE_TYPES = [
   { id: 'over_under', label: 'Over / Under', types: ['over_under', 'pro_over_under', 'under_7', 'over_2'] as SignalType[] },
@@ -427,7 +428,7 @@ export default function Scanner() {
   const [recMode, setRecMode] = useState(false);
   const [recLossThreshold, setRecLossThreshold] = useState('3');
   const [recAltType, setRecAltType] = useState('over_under');
-  const [showRecTypePicker, setShowRecTypePicker] = useState(false);
+  const [showRecTypePicker, setShowRecTypePicker] = useState<string | false>(false);
   const recTypePickerRef = useRef<HTMLDivElement>(null);
   const tradeTypePickerRef = useRef<HTMLDivElement>(null);
   const symbolPickerRef = useRef<HTMLDivElement>(null);
@@ -444,6 +445,8 @@ export default function Scanner() {
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [monitorSymbols, setMonitorSymbols] = useState<string[]>(['R_10','R_25','R_50','R_75','R_100','1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V','BOOM1000','CRASH1000']);
   const monitorWS = useSharedMarketWS(monitorSymbols);
+  const [recFallback2, setRecFallback2] = useState<string>('over_under');
+  const [recFallback3, setRecFallback3] = useState<string>('rise_fall');
   const orb = useDraggableOrb();
 
   const allowedTypes = useMemo(() => {
@@ -637,6 +640,17 @@ export default function Scanner() {
     const signalToUse = selectedSignal || combinedSignals[0] || null;
     const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
     const { contractType, prediction } = signalToContract(signalToUse, entryDigit);
+    const strategyLabel = signalToUse?.label ?? TRADE_TYPES.find(t => t.id === selectedTradeType)?.label ?? selectedTradeType;
+
+    // Build fallback chain from user-selected recovery strategies
+    const fallbackChain = recMode
+      ? [
+          { ...signalToContract({ ...signalToUse, tradeDirection: undefined, type: recAltType as SignalType }, undefined), strategyLabel: TRADE_TYPES.find(t => t.id === recAltType)?.label ?? recAltType },
+          { ...signalToContract({ ...signalToUse, tradeDirection: undefined, type: recFallback2 as SignalType }, undefined), strategyLabel: TRADE_TYPES.find(t => t.id === recFallback2)?.label ?? recFallback2 },
+          { ...signalToContract({ ...signalToUse, tradeDirection: undefined, type: recFallback3 as SignalType }, undefined), strategyLabel: TRADE_TYPES.find(t => t.id === recFallback3)?.label ?? recFallback3 },
+        ].filter((s) => s.contractType)
+      : undefined;
+
     const config: TradeConfig = {
       stake: parseFloat(stake) || 1,
       martingale: parseFloat(martingale) || 2,
@@ -645,15 +659,12 @@ export default function Scanner() {
       symbol: selectedSymbol,
       contractType,
       prediction,
-      recovery: recMode
-        ? {
-            lossThreshold: parseInt(recLossThreshold, 10) || 3,
-            altContractType: signalToContract({ ...signalToUse, tradeDirection: undefined }, undefined).contractType,
-          }
-        : undefined,
+      strategyLabel,
+      fallbackChain,
+      lossThreshold: recMode ? (parseInt(recLossThreshold, 10) || 1) : undefined,
     };
     trade.startTrade(config, apiToken);
-  }, [apiToken, selectedSignal, combinedSignals, predictionChoice, stake, martingale, takeProfit, stopLoss, selectedSymbol, recMode, recLossThreshold, signalToContract, trade]);
+  }, [apiToken, selectedSignal, combinedSignals, predictionChoice, stake, martingale, takeProfit, stopLoss, selectedSymbol, recMode, recLossThreshold, recAltType, recFallback2, recFallback3, signalToContract, trade]);
 
   const handleSaveToken = useCallback((token: string) => {
     setApiToken(token);
@@ -798,6 +809,7 @@ export default function Scanner() {
           {([
             { id: 'scanner', label: 'Scanner' },
             { id: 'monitor', label: 'Market Monitor' },
+            { id: 'journal', label: 'Journal' },
           ] as { id: PanelTab; label: string }[]).map(tab => (
             <button
               key={tab.id}
@@ -1071,7 +1083,7 @@ export default function Scanner() {
                       <ChevronDown size={12} className={recMode ? 'rotate-180 transition-transform' : 'transition-transform'} />
                     </button>
                     {recMode && (
-                      <div className="px-3 pb-3 space-y-2">
+                      <div className="px-3 pb-3 space-y-2" ref={recTypePickerRef}>
                         <div className="flex items-center gap-2">
                           <label className="text-[10px] text-white/50 w-24 shrink-0">Loss threshold</label>
                           <input type="number" min={1} max={10} value={recLossThreshold} onChange={e => setRecLossThreshold(e.target.value)}
@@ -1080,14 +1092,14 @@ export default function Scanner() {
                         </div>
                         <div className="flex items-center gap-2">
                           <label className="text-[10px] text-white/50 w-24 shrink-0">Alt trade type</label>
-                          <div className="flex-1 relative" ref={recTypePickerRef}>
-                            <button onClick={() => setShowRecTypePicker(v => !v)}
+                          <div className="flex-1 relative">
+                            <button onClick={() => setShowRecTypePicker(v => v === 'alt' ? false : 'alt')}
                               className="w-full rounded-lg px-2 py-1 text-xs font-bold text-left flex items-center justify-between border"
                               style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(245,158,11,0.3)', color: '#f59e0b' }}>
                               <span>{TRADE_TYPES.find(t => t.id === recAltType)?.label ?? recAltType}</span>
                               <ChevronDown size={10} />
                             </button>
-                            {showRecTypePicker && (
+                            {showRecTypePicker === 'alt' && (
                               <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#1a1200] shadow-2xl overflow-hidden">
                                 {TRADE_TYPES.map(t => (
                                   <button key={t.id} onClick={() => { setRecAltType(t.id); setShowRecTypePicker(false); }}
@@ -1121,8 +1133,52 @@ export default function Scanner() {
                           );
                         })()}
                         <p className="text-[9px] text-white/30 leading-snug">
-                          {TRADE_TYPES.find(t => t.id === selectedTradeType)?.label} → <strong className="text-amber-300">{TRADE_TYPES.find(t => t.id === recAltType)?.label}</strong> after {recLossThreshold} losses
+                          {TRADE_TYPES.find(t => t.id === selectedTradeType)?.label} → <strong className="text-amber-300">{TRADE_TYPES.find(t => t.id === recAltType)?.label}</strong> → <strong className="text-sky-300">{TRADE_TYPES.find(t => t.id === recFallback2)?.label}</strong> → <strong className="text-green-300">{TRADE_TYPES.find(t => t.id === recFallback3)?.label}</strong> after {recLossThreshold} losses each. Win resets to initial.
                         </p>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-white/50 w-24 shrink-0">Fallback 2</label>
+                          <div className="flex-1 relative">
+                            <button onClick={() => setShowRecTypePicker(v => v === 'fb2' ? false : 'fb2')}
+                              className="w-full rounded-lg px-2 py-1 text-xs font-bold text-left flex items-center justify-between border"
+                              style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(56,189,248,0.3)', color: '#38bdf8' }}>
+                              <span>{TRADE_TYPES.find(t => t.id === recFallback2)?.label ?? recFallback2}</span>
+                              <ChevronDown size={10} />
+                            </button>
+                            {showRecTypePicker === 'fb2' && (
+                              <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#0a1a2a] shadow-2xl overflow-hidden">
+                                {TRADE_TYPES.map(t => (
+                                  <button key={t.id} onClick={() => { setRecFallback2(t.id); setShowRecTypePicker(false); }}
+                                    className="w-full px-3 py-2 text-xs font-bold text-left transition hover:bg-white/5 flex items-center justify-between"
+                                    style={recFallback2 === t.id ? { color: '#38bdf8' } : { color: 'rgba(255,255,255,0.5)' }}>
+                                    {t.label} {recFallback2 === t.id && <Check size={10} />}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-white/50 w-24 shrink-0">Fallback 3</label>
+                          <div className="flex-1 relative">
+                            <button onClick={() => setShowRecTypePicker(v => v === 'fb3' ? false : 'fb3')}
+                              className="w-full rounded-lg px-2 py-1 text-xs font-bold text-left flex items-center justify-between border"
+                              style={{ background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(16,185,129,0.3)', color: '#34d399' }}>
+                              <span>{TRADE_TYPES.find(t => t.id === recFallback3)?.label ?? recFallback3}</span>
+                              <ChevronDown size={10} />
+                            </button>
+                            {showRecTypePicker === 'fb3' && (
+                              <div className="absolute z-50 mt-1 w-full rounded-xl border border-white/10 bg-[#0a2a1a] shadow-2xl overflow-hidden">
+                                {TRADE_TYPES.map(t => (
+                                  <button key={t.id} onClick={() => { setRecFallback3(t.id); setShowRecTypePicker(false); }}
+                                    className="w-full px-3 py-2 text-xs font-bold text-left transition hover:bg-white/5 flex items-center justify-between"
+                                    style={recFallback3 === t.id ? { color: '#34d399' } : { color: 'rgba(255,255,255,0.5)' }}>
+                                    {t.label} {recFallback3 === t.id && <Check size={10} />}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1332,6 +1388,13 @@ export default function Scanner() {
                   setActiveTab('scanner');
                 }}
               />
+            </div>
+          )}
+
+          {/* ── JOURNAL TAB ── */}
+          {activeTab === 'journal' && (
+            <div className="p-3 flex-1 flex flex-col min-h-0">
+              <TradeJournal />
             </div>
           )}
         </>

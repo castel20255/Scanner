@@ -1,5 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useDerivWS } from './useDerivWS';
+import { supabase, TradeJournalRow } from '../lib/supabase';
+
+export type FallbackStep = {
+  contractType: string;
+  prediction?: number;
+  strategyLabel: string;
+};
 
 export type TradeConfig = {
   stake: number;
@@ -9,10 +16,9 @@ export type TradeConfig = {
   symbol: string;
   contractType: string;
   prediction?: number;
-  recovery?: {
-    lossThreshold: number;
-    altContractType: string;
-  };
+  strategyLabel: string;
+  fallbackChain?: FallbackStep[];
+  lossThreshold?: number;
 };
 
 export type TradeResult = {
@@ -22,6 +28,11 @@ export type TradeResult = {
   entrySpot: string;
   exitSpot: string;
   timestamp: number;
+  contractType: string;
+  strategyLabel: string;
+  prediction: number | undefined;
+  recoveryMode: boolean;
+  recoveryStep: number;
 };
 
 export type TradeState = {
@@ -34,6 +45,9 @@ export type TradeState = {
   error: string | null;
   balance: number | null;
   currency: string | null;
+  recoveryMode: boolean;
+  recoveryStep: number;
+  currentStrategyLabel: string;
 };
 
 const initialState: TradeState = {
@@ -46,6 +60,9 @@ const initialState: TradeState = {
   error: null,
   balance: null,
   currency: null,
+  recoveryMode: false,
+  recoveryStep: 0,
+  currentStrategyLabel: '',
 };
 
 export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
@@ -53,9 +70,11 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
   const tokenRef = useRef<string | null>(null);
   const configRef = useRef<TradeConfig | null>(null);
   const runningRef = useRef(false);
-  const recoveryActiveRef = useRef(false);
+  const recoveryStepRef = useRef(0);
   const proposalIdRef = useRef<string | null>(null);
   const contractSubIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string>('');
+  const lossCountRef = useRef(0);
 
   const setToken = useCallback((token: string | null) => {
     tokenRef.current = token;
@@ -77,29 +96,48 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
         const key = `trade_wait_${Math.random()}`;
         let timeout: ReturnType<typeof setTimeout> | null = null;
 
-        const cleanup = () => {
-          if (timeout) clearTimeout(timeout);
-          ws.onMessage(key, () => {});
-        };
+        const unsub = ws.onMessage(key, (data) => {
+          if (resolved) return;
+          if (predicate(data)) {
+            resolved = true;
+            unsub();
+            if (timeout) clearTimeout(timeout);
+            resolve(data);
+          }
+        });
 
         timeout = setTimeout(() => {
           if (resolved) return;
           resolved = true;
-          cleanup();
+          unsub();
           resolve(null);
         }, timeoutMs);
-
-        ws.onMessage(key, (data) => {
-          if (resolved) return;
-          if (predicate(data)) {
-            resolved = true;
-            cleanup();
-            resolve(data);
-          }
-        });
       }),
     [ws]
   );
+
+  const logTrade = useCallback(async (result: TradeResult, balanceAfter: number | null) => {
+    const row: TradeJournalRow = {
+      session_id: sessionIdRef.current,
+      symbol: configRef.current?.symbol ?? '',
+      contract_type: result.contractType,
+      strategy_label: result.strategyLabel,
+      prediction: result.prediction ?? null,
+      stake: configRef.current?.stake ?? 0,
+      payout: result.profit,
+      won: result.won,
+      entry_spot: result.entrySpot || null,
+      exit_spot: result.exitSpot || null,
+      recovery_mode: result.recoveryMode,
+      recovery_step: result.recoveryStep,
+      balance_after: balanceAfter,
+    };
+    try {
+      await supabase.from('trade_journals').insert(row);
+    } catch {
+      // Journal write failure should not stop trading
+    }
+  }, []);
 
   const runTradeCycle = useCallback(async () => {
     const config = configRef.current;
@@ -129,12 +167,37 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
 
     while (runningRef.current && configRef.current) {
       const cfg = configRef.current;
-      const useRecovery = recoveryActiveRef.current && cfg.recovery;
-      const contractType = useRecovery ? cfg.recovery!.altContractType : cfg.contractType;
-      const prediction = useRecovery ? undefined : cfg.prediction;
+      const lossThreshold = cfg.lossThreshold ?? 1;
+      const fallback = cfg.fallbackChain ?? [];
+
+      // Determine which step we're on
+      const step = recoveryStepRef.current;
+      let contractType: string;
+      let prediction: number | undefined;
+      let strategyLabel: string;
+      let recoveryMode = false;
+
+      if (step === 0) {
+        contractType = cfg.contractType;
+        prediction = cfg.prediction;
+        strategyLabel = cfg.strategyLabel;
+      } else {
+        const fb = fallback[Math.min(step - 1, fallback.length - 1)];
+        contractType = fb.contractType;
+        prediction = fb.prediction;
+        strategyLabel = fb.strategyLabel;
+        recoveryMode = true;
+      }
+
+      setState((s) => ({
+        ...s,
+        status: 'proposing',
+        recoveryMode,
+        recoveryStep: step,
+        currentStrategyLabel: strategyLabel,
+      }));
 
       // 2. Proposal
-      setState((s) => ({ ...s, status: 'proposing' }));
       const proposalReq: Record<string, unknown> = {
         proposal: 1,
         amount: cfg.stake,
@@ -185,10 +248,18 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
       // 4. Monitor
       wsSend({ proposal_open_contract: 1, contract_id: contractId, subscribe: 1 });
       const settledData = await waitForMessage(
-        (d) => d.msg_type === 'proposal_open_contract' && (d as { proposal_open_contract?: { is_sold: number } }).proposal_open_contract?.is_sold === 1,
+        (d) => {
+          if (d.msg_type === 'proposal_open_contract') {
+            const sub = (d as { subscription?: { id: string } }).subscription;
+            if (sub?.id) contractSubIdRef.current = sub.id;
+            const poc = (d as { proposal_open_contract?: { is_sold: number } }).proposal_open_contract;
+            return poc?.is_sold === 1;
+          }
+          return false;
+        },
         60000
       );
-      if (contractSubIdRef.current && wsSend) {
+      if (contractSubIdRef.current) {
         wsSend({ forget: contractSubIdRef.current });
         contractSubIdRef.current = null;
       }
@@ -197,7 +268,7 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
         runningRef.current = false;
         return;
       }
-      const contract = (settledData as { proposal_open_contract?: { profit: number; entry_spot: string; exit_spot: string } }).proposal_open_contract;
+      const contract = (settledData as { proposal_open_contract?: { profit: number; entry_spot: string; exit_spot: string; balance_after: number } }).proposal_open_contract;
       if (!contract) {
         setState((s) => ({ ...s, error: 'No contract data on settlement', status: 'stopped' }));
         runningRef.current = false;
@@ -206,6 +277,7 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
 
       const profit = contract.profit;
       const won = profit > 0;
+      const balanceAfter = (contract as { balance_after?: number }).balance_after ?? null;
       const result: TradeResult = {
         contractId,
         profit,
@@ -213,20 +285,35 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
         entrySpot: contract.entry_spot ?? '',
         exitSpot: contract.exit_spot ?? '',
         timestamp: Date.now(),
+        contractType,
+        strategyLabel,
+        prediction,
+        recoveryMode,
+        recoveryStep: step,
       };
 
+      // Log to Supabase journal (fire-and-forget)
+      logTrade(result, balanceAfter);
+
       // 5. Loop logic
+      if (won) {
+        recoveryStepRef.current = 0;
+        lossCountRef.current = 0;
+      } else {
+        lossCountRef.current += 1;
+        if (lossCountRef.current >= lossThreshold && fallback.length > 0) {
+          recoveryStepRef.current = Math.min(step + 1, fallback.length);
+        }
+      }
+
       setState((s) => {
         const newTotalProfit = s.totalProfit + profit;
-        const newLossCount = won ? 0 : s.lossCount + 1;
+        const newLossCount = won ? 0 : lossCountRef.current;
         const newStake = won ? configRef.current!.stake : s.currentStake * configRef.current!.martingale;
-        const newHistory = [result, ...s.tradeHistory].slice(0, 20);
+        const newHistory = [result, ...s.tradeHistory].slice(0, 50);
 
-        // Recovery mode check
-        if (configRef.current?.recovery && newLossCount >= configRef.current.recovery.lossThreshold) {
-          recoveryActiveRef.current = true;
-        }
-        if (won) recoveryActiveRef.current = false;
+        const newRecoveryStep = won ? 0 : recoveryStepRef.current;
+        const newRecoveryMode = newRecoveryStep > 0;
 
         // Stop conditions
         if (newTotalProfit >= configRef.current!.takeProfit) {
@@ -239,6 +326,10 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
             currentStake: newStake,
             tradeHistory: newHistory,
             contractId: null,
+            recoveryMode: newRecoveryMode,
+            recoveryStep: newRecoveryStep,
+            currentStrategyLabel: strategyLabel,
+            balance: balanceAfter ?? s.balance,
           };
         }
         if (newLossCount >= configRef.current!.stopLoss) {
@@ -251,6 +342,10 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
             currentStake: newStake,
             tradeHistory: newHistory,
             contractId: null,
+            recoveryMode: newRecoveryMode,
+            recoveryStep: newRecoveryStep,
+            currentStrategyLabel: strategyLabel,
+            balance: balanceAfter ?? s.balance,
           };
         }
 
@@ -262,29 +357,34 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
           currentStake: newStake,
           tradeHistory: newHistory,
           contractId: null,
+          recoveryMode: newRecoveryMode,
+          recoveryStep: newRecoveryStep,
+          currentStrategyLabel: strategyLabel,
+          balance: balanceAfter ?? s.balance,
         };
       });
 
       if (!runningRef.current) break;
-      // Brief pause before next trade
       await new Promise((r) => setTimeout(r, 500));
     }
 
     if (!runningRef.current) {
       setState((s) => (s.status === 'stopped' ? s : { ...s, status: 'stopped' }));
     }
-  }, [ws, waitForMessage]);
+  }, [ws, waitForMessage, logTrade]);
 
   const startTrade = useCallback(
     (config: TradeConfig, token: string | null) => {
       tokenRef.current = token;
       configRef.current = config;
-      recoveryActiveRef.current = false;
+      recoveryStepRef.current = 0;
+      sessionIdRef.current = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       runningRef.current = true;
       setState({
         ...initialState,
         status: 'authorizing',
         currentStake: config.stake,
+        currentStrategyLabel: config.strategyLabel,
       });
       runTradeCycle();
     },
@@ -293,7 +393,7 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
 
   const reset = useCallback(() => {
     runningRef.current = false;
-    recoveryActiveRef.current = false;
+    recoveryStepRef.current = 0;
     configRef.current = null;
     if (contractSubIdRef.current && ws.send) {
       ws.send({ forget: contractSubIdRef.current });
@@ -308,5 +408,5 @@ export function useDerivTrade(ws: ReturnType<typeof useDerivWS>) {
     };
   }, []);
 
-  return { state, startTrade, stop, reset, setToken };
+  return { state, startTrade, stop, reset, setToken, sessionId: sessionIdRef };
 }
