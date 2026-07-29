@@ -6,7 +6,6 @@ import {
   TrendingUp,
   TrendingDown,
   Download,
-  Play,
   X,
   Check,
   AlertTriangle,
@@ -15,12 +14,17 @@ import {
   Minimize2,
   Maximize2,
   GripVertical,
-  Orbit,
   Sparkles,
   BarChart2,
+  KeyRound,
+  Square,
+  Activity,
+  Wallet,
 } from 'lucide-react';
 import MarketMonitor from './MarketMonitor';
+import ApiTokenModal from './ApiTokenModal';
 import { useDerivWS } from '../hooks/useDerivWS';
+import { useDerivTrade, TradeConfig } from '../hooks/useDerivTrade';
 import { analyzeMultiWindow, MultiWindowAnalysis } from '../lib/analysis';
 import { generateCombinedRankedSignals, Signal, SignalType } from '../lib/signals';
 import { SYMBOLS } from '../lib/symbols';
@@ -432,7 +436,11 @@ export default function Scanner() {
   const autoScanRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const { isConnected, subscriptionState, subscribeSymbol } = useDerivWS();
+  const ws = useDerivWS();
+  const { isConnected, subscriptionState, subscribeSymbol } = ws;
+  const trade = useDerivTrade(ws);
+  const [apiToken, setApiToken] = useState<string | null>(null);
+  const [showTokenModal, setShowTokenModal] = useState(false);
   const orb = useDraggableOrb();
 
   const allowedTypes = useMemo(() => {
@@ -586,6 +594,75 @@ export default function Scanner() {
     a.click();
     URL.revokeObjectURL(url);
   }, [stake, takeProfit, stopLoss, martingale, selectedSymbol, selectedSignal, combinedSignals, predictionChoice, recMode, recLossThreshold, recAltType]);
+
+  // Map a Signal's tradeDirection to a Deriv contract_type + prediction
+  const signalToContract = useCallback((sig: Signal | null, entryDigit?: number): { contractType: string; prediction?: number } => {
+    if (!sig) return { contractType: 'DIGITOVER', prediction: 5 };
+    const dir = (sig.tradeDirection ?? '').toUpperCase();
+    // OVER X / UNDER X
+    const ouMatch = dir.match(/^(OVER|UNDER)\s*(\d)$/);
+    if (ouMatch) {
+      const contractType = ouMatch[1] === 'OVER' ? 'DIGITOVER' : 'DIGITUNDER';
+      return { contractType, prediction: entryDigit ?? parseInt(ouMatch[2], 10) };
+    }
+    // MATCHES X / DIFFERS X
+    const matchMatch = dir.match(/^MATCHES\s*(\d)$/);
+    if (matchMatch) return { contractType: 'DIGITMATCH', prediction: entryDigit ?? parseInt(matchMatch[1], 10) };
+    const diffMatch = dir.match(/^DIFFERS\s*(\d)$/);
+    if (diffMatch) return { contractType: 'DIGITDIFF', prediction: entryDigit ?? parseInt(diffMatch[1], 10) };
+    // EVEN / ODD
+    if (dir === 'EVEN') return { contractType: 'DIGITEVEN' };
+    if (dir === 'ODD') return { contractType: 'DIGITODD' };
+    // RISE / FALL
+    if (dir === 'RISE') return { contractType: 'CALL' };
+    if (dir === 'FALL') return { contractType: 'PUT' };
+    // Fallback: use selected trade type
+    const tt = TRADE_TYPES.find(t => t.id === selectedTradeType);
+    if (tt?.id === 'even_odd') return { contractType: 'DIGITEVEN' };
+    if (tt?.id === 'over_under') return { contractType: 'DIGITOVER', prediction: entryDigit ?? 5 };
+    if (tt?.id === 'matches') return { contractType: 'DIGITMATCH', prediction: entryDigit ?? 5 };
+    if (tt?.id === 'differs') return { contractType: 'DIGITDIFF', prediction: entryDigit ?? 5 };
+    if (tt?.id === 'rise_fall') return { contractType: 'CALL' };
+    return { contractType: 'DIGITOVER', prediction: entryDigit ?? 5 };
+  }, [selectedTradeType]);
+
+  const handleAutoTrade = useCallback(() => {
+    if (!apiToken) {
+      setShowTokenModal(true);
+      return;
+    }
+    const signalToUse = selectedSignal || combinedSignals[0] || null;
+    const entryDigit = predictionChoice ?? signalToUse?.entryDigits?.[0] ?? signalToUse?.targetDigit ?? undefined;
+    const { contractType, prediction } = signalToContract(signalToUse, entryDigit);
+    const config: TradeConfig = {
+      stake: parseFloat(stake) || 1,
+      martingale: parseFloat(martingale) || 2,
+      takeProfit: parseFloat(takeProfit) || 10,
+      stopLoss: parseInt(stopLoss, 10) || 5,
+      symbol: selectedSymbol,
+      contractType,
+      prediction,
+      recovery: recMode
+        ? {
+            lossThreshold: parseInt(recLossThreshold, 10) || 3,
+            altContractType: signalToContract({ ...signalToUse, tradeDirection: undefined }, undefined).contractType,
+          }
+        : undefined,
+    };
+    trade.startTrade(config, apiToken);
+  }, [apiToken, selectedSignal, combinedSignals, predictionChoice, stake, martingale, takeProfit, stopLoss, selectedSymbol, recMode, recLossThreshold, signalToContract, trade]);
+
+  const handleSaveToken = useCallback((token: string) => {
+    setApiToken(token);
+    trade.setToken(token);
+    setShowTokenModal(false);
+  }, [trade]);
+
+  const handleStopTrade = useCallback(() => {
+    trade.stop();
+  }, [trade]);
+
+  const isTrading = trade.state.status !== 'idle' && trade.state.status !== 'stopped';
 
   const selectedSymbolInfo = SYMBOLS.find((s) => s.id === selectedSymbol);
   const lastDigit = mwa?.lastDigit ?? null;
@@ -1111,12 +1188,128 @@ export default function Scanner() {
                       <Download size={12} />
                       Load Bot
                     </button>
-                    <button onClick={handleLoadBot} className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1"
-                      style={{ background: 'linear-gradient(135deg, #E67E22, #8E44AD)' }}>
-                      <Play size={12} />
-                      Load & Run
+                    <button onClick={handleAutoTrade} disabled={isTrading}
+                      className="text-white text-xs font-black py-3 rounded-xl transition active:scale-95 flex items-center justify-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: 'linear-gradient(135deg, #D61A8C, #8E44AD)' }}>
+                      <Zap size={12} />
+                      Auto Trade
                     </button>
                   </div>
+
+                  {/* API token status + trade controls */}
+                  <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => setShowTokenModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition"
+                      style={{
+                        background: apiToken ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.05)',
+                        border: `1px solid ${apiToken ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.12)'}`,
+                        color: apiToken ? '#4ade80' : 'rgba(255,255,255,0.5)',
+                      }}
+                    >
+                      <KeyRound size={10} />
+                      {apiToken ? 'Token Set' : 'Set API Token'}
+                    </button>
+                    {isTrading && (
+                      <button
+                        onClick={handleStopTrade}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black text-white transition active:scale-95"
+                        style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}
+                      >
+                        <Square size={10} fill="white" />
+                        Stop Trading
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Live trade panel */}
+                  {isTrading && (
+                    <div className="rounded-2xl p-3 space-y-2.5"
+                      style={{ background: 'rgba(214,26,140,0.06)', border: '1px solid rgba(214,26,140,0.2)' }}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Activity size={12} className="text-pink-400 animate-pulse" />
+                          <span className="text-[10px] font-black text-pink-400 uppercase tracking-wider">
+                            Live Trading
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-white/50 capitalize">
+                          {trade.state.status}
+                        </span>
+                      </div>
+
+                      {/* Balance */}
+                      {trade.state.balance !== null && (
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          <Wallet size={11} className="text-white/40" />
+                          <span className="text-white/50">Balance:</span>
+                          <span className="font-bold text-white">
+                            {trade.state.balance.toFixed(2)} {trade.state.currency ?? 'USD'}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* P&L progress bar */}
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="text-white/50">P&L</span>
+                          <span className={`font-bold ${trade.state.totalProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {trade.state.totalProfit >= 0 ? '+' : ''}{trade.state.totalProfit.toFixed(2)} / {takeProfit}
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                          <div className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, (trade.state.totalProfit / (parseFloat(takeProfit) || 10)) * 100))}%`,
+                              background: 'linear-gradient(90deg, #D61A8C, #8E44AD)',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Loss streak / martingale */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-lg p-2 text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                          <p className="text-[9px] text-white/40 uppercase font-bold">Losses</p>
+                          <p className="text-sm font-black text-white">{trade.state.lossCount}/{stopLoss}</p>
+                        </div>
+                        <div className="rounded-lg p-2 text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                          <p className="text-[9px] text-white/40 uppercase font-bold">Stake</p>
+                          <p className="text-sm font-black text-white">{trade.state.currentStake.toFixed(2)}</p>
+                        </div>
+                        <div className="rounded-lg p-2 text-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                          <p className="text-[9px] text-white/40 uppercase font-bold">Trades</p>
+                          <p className="text-sm font-black text-white">{trade.state.tradeHistory.length}</p>
+                        </div>
+                      </div>
+
+                      {/* Trade history */}
+                      {trade.state.tradeHistory.length > 0 && (
+                        <div className="space-y-1 max-h-24 overflow-y-auto">
+                          {trade.state.tradeHistory.slice(0, 6).map((t, i) => (
+                            <div key={i} className="flex items-center justify-between text-[10px] px-2 py-1 rounded"
+                              style={{ background: 'rgba(255,255,255,0.03)' }}>
+                              <span className={t.won ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}>
+                                {t.won ? 'WIN' : 'LOSS'}
+                              </span>
+                              <span className={`font-mono ${t.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {t.profit >= 0 ? '+' : ''}{t.profit.toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Error */}
+                      {trade.state.error && (
+                        <div className="flex items-start gap-1.5 rounded-lg p-2"
+                          style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                          <AlertTriangle size={11} className="text-red-400 shrink-0 mt-0.5" />
+                          <span className="text-[10px] text-red-300 leading-snug">{trade.state.error}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -1143,6 +1336,12 @@ export default function Scanner() {
     <>
       {step === 'orb' && orbEl}
       {panel}
+      <ApiTokenModal
+        open={showTokenModal}
+        initialToken={apiToken}
+        onSave={handleSaveToken}
+        onClose={() => setShowTokenModal(false)}
+      />
     </>
   );
 }

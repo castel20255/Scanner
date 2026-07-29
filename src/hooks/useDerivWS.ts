@@ -16,6 +16,8 @@ type SubscriptionState = {
   quotes: number[];
 };
 
+type MessageHandler = (data: Record<string, unknown>) => void;
+
 export function useDerivWS(options: DerivWSOptions = {}) {
   const appId = options.appId || '1089';
   const wsRef = useRef<WebSocket | null>(null);
@@ -25,11 +27,11 @@ export function useDerivWS(options: DerivWSOptions = {}) {
   const [activeSymbol, setActiveSymbol] = useState<string | null>(null);
   const [subscriptionState, setSubscriptionState] = useState<SubscriptionState | null>(null);
   const tickHandlersRef = useRef<((tick: TickData) => void)[]>([]);
+  const messageHandlersRef = useRef<Map<string, MessageHandler>>(new Map());
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const activeSymbolRef = useRef<string | null>(null);
 
-  // Keep activeSymbolRef in sync
   useEffect(() => {
     activeSymbolRef.current = activeSymbol;
   }, [activeSymbol]);
@@ -44,7 +46,6 @@ export function useDerivWS(options: DerivWSOptions = {}) {
     ws.onopen = () => {
       if (!mountedRef.current) return;
       setIsConnected(true);
-      // Auto-resubscribe if we had an active symbol
       if (activeSymbolRef.current) {
         ws.send(
           JSON.stringify({
@@ -63,7 +64,6 @@ export function useDerivWS(options: DerivWSOptions = {}) {
       setIsConnected(false);
       subIdRef.current = null;
       wsRef.current = null;
-      // Auto-reconnect after 2 seconds
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = setTimeout(() => {
         if (mountedRef.current) connect();
@@ -79,22 +79,21 @@ export function useDerivWS(options: DerivWSOptions = {}) {
     ws.onmessage = (event) => {
       if (!mountedRef.current) return;
       try {
-        const data = JSON.parse(event.data);
+        const data = JSON.parse(event.data) as Record<string, unknown>;
         if (data.msg_type === 'tick' && data.tick) {
-          const tick: TickData = {
-            quote: data.tick.quote,
-            epoch: data.tick.epoch,
-            symbol: data.tick.symbol,
+          const tick = data.tick as { quote: number; epoch: number; symbol: string };
+          const tickData: TickData = {
+            quote: tick.quote,
+            epoch: tick.epoch,
+            symbol: tick.symbol,
           };
-          tickHandlersRef.current.forEach((h) => h(tick));
-
-          // Store subscription ID for later forget
+          tickHandlersRef.current.forEach((h) => h(tickData));
           if (data.subscription) {
-            subIdRef.current = data.subscription.id;
+            subIdRef.current = (data.subscription as { id: string }).id;
           }
         }
         if (data.msg_type === 'history' && data.history) {
-          const prices = data.history.prices as number[];
+          const prices = (data.history as { prices: number[] }).prices;
           const currentSymbol = activeSymbolRef.current;
           setSubscriptionState((prev) => ({
             symbol: currentSymbol ?? prev?.symbol ?? '',
@@ -114,6 +113,11 @@ export function useDerivWS(options: DerivWSOptions = {}) {
             );
           }
         }
+        // Dispatch to registered message handlers
+        const msgType = data.msg_type as string | undefined;
+        if (msgType) {
+          messageHandlersRef.current.forEach((h) => h(data));
+        }
       } catch {
         // ignore parse errors
       }
@@ -131,7 +135,6 @@ export function useDerivWS(options: DerivWSOptions = {}) {
         return;
       }
 
-      // Unsubscribe previous
       if (subIdRef.current) {
         wsRef.current.send(
           JSON.stringify({
@@ -142,7 +145,6 @@ export function useDerivWS(options: DerivWSOptions = {}) {
         subIdRef.current = null;
       }
 
-      // Get last 1000 ticks history first
       wsRef.current.send(
         JSON.stringify({
           ticks_history: symbol,
@@ -163,6 +165,19 @@ export function useDerivWS(options: DerivWSOptions = {}) {
     };
   }, []);
 
+  const onMessage = useCallback((key: string, handler: MessageHandler) => {
+    messageHandlersRef.current.set(key, handler);
+    return () => {
+      messageHandlersRef.current.delete(key);
+    };
+  }, []);
+
+  const send = useCallback((payload: Record<string, unknown>) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
+    wsRef.current.send(JSON.stringify({ ...payload, req_id: reqId.current++ }));
+    return true;
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     connect();
@@ -173,7 +188,6 @@ export function useDerivWS(options: DerivWSOptions = {}) {
     };
   }, [connect]);
 
-  // Handle incoming live ticks — append digit to subscriptionState
   useEffect(() => {
     const unsub = onTick((tick) => {
       if (tick.symbol !== activeSymbolRef.current) return;
@@ -195,6 +209,8 @@ export function useDerivWS(options: DerivWSOptions = {}) {
     subscriptionState,
     subscribeSymbol,
     onTick,
+    onMessage,
+    send,
   };
 }
 
